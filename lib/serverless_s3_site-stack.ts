@@ -71,20 +71,26 @@ export class ServerlessS3SiteStack extends Stack {
     });
     websiteBucket.grantRead(originAccessIdentity);
 
-    // Cloudfront frontend for site distription and serving https
-    const websiteDistribution = new cloudfront.Distribution(this, 'websiteDistribution', {
-      defaultBehavior: {
-        origin: new cloudfrontOrigins.S3Origin(websiteBucket, {
-          originAccessIdentity: originAccessIdentity
-        }),
-      },
+    // // // Cloudfront frontend for site distription and serving https
+    const websiteDistribution = new cloudfront.CloudFrontWebDistribution(this, 'websiteDistribution', {
+      originConfigs: [
+        {
+          s3OriginSource: {
+            s3BucketSource: websiteBucket,
+            originAccessIdentity: originAccessIdentity
+          },
+          behaviors: [
+            { isDefaultBehavior: true }
+          ]
+        }
+      ],
       defaultRootObject: "index.html"
     });
 
 
 
-    //const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName;
-    const webisteOrigin = 'http://localhost:8080';
+    const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName;
+    //const webisteOrigin = 'http://localhost:8080';
 
     // Add CORS to allow the cloudfront website to access the content bucket
     // Currently enable GET/POST/PUT/DELETE to retrieve and update content
