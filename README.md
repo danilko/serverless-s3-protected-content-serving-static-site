@@ -57,52 +57,25 @@ Deploy the stack
 cdk deploy
 ```
 
-Please continue with gather info below section to continue the setup
-
-## Gather info
-
-### The user API url
-The deployment stack will result in a `API Gateway Endpoint` url, please note it down
-Example
+Please continue with gather info as part of output, info will look like below
 ```
-https://<generated id>.execute-api.us-west-2.amazonaws.com/prod/
-```
-
-### For website and content buckets
-Please do (change `serverlesss3sitestack` to target stack if it is different)
-```
-aws s3 ls | grep -i 'serverlesss3sitestack'
-```
-
-Note down the S3 bucket
+ServerlessS3SiteStack.WebsiteBucketName = testbucket
+ServerlessS3SiteStack.WebsiteCognitoUserPoolId = testid_us-west-2
+ServerlessS3SiteStack.WebsiteSignInUrl = <website sign in url>
+ServerlessS3SiteStack.WebsiteUrl = https://test12.cloudfront.net
+ServerlessS3SiteStack.usersapiEndpoint* = https://testapi.execute-api.us-west-2.amazonaws.com/prod/
 
 ```
-website -> 	serverlesss3sitestack*-websitebucket*
-content -> 	serverlesss3sitestack*-contentbucket*
-```
 
-### For pool id and sign in url
-Please go to AWS Console -> Select region where stack is located -> Services -> Cloudformation -> Stacks -> Look for stack named `ServerlessS3ite*` (or name modify in cdk) -> Click `Resources` tab -> go to type `AWS::Cognito::UserPool`, please click the link
+## Setup
 
-Once in the link:
-Under `General Settings`, copy the `Pool Id`
-Example
-```
-us-west-2_<generated id>
-```
-
-Under `App client setting`, copy the `Launch Hosted UI`'s url
-Example
-```
-https://<app name>.auth.us-west-2.amazoncognito.com/login?client_id=<client id>&response_type=token&scope=openid&redirect_uri=https://<generated id>.cloudfront.net/callback
-```
 
 ### Create an user
 The app does not include a sign in page yet, so need to manually create an user for testing
 
-Create a sample user, please replace `<Pool Id from above>`, `<an alpha numeric username>` and `<valid user email>` placeholders
+Create a sample user, please replace `<WebSiteUserPoolId from CDK output>`, `<an alpha numeric username>` and `<valid user email>` placeholders with actual valuses
 ```
-aws cognito-idp admin-create-user --user-pool-id <Pool Id from above> --username '<an alpha numeric username>' --user-attributes Name=email,Value=<valid user email>
+aws cognito-idp admin-create-user --user-pool-id <WebSiteUserPoolId from CDK output> --username '<an alpha numeric username>' --user-attributes Name=email,Value=<valid user email>
 ```
 
 One will receive a temporary credential from above, note the credential for later use
@@ -110,23 +83,23 @@ One will receive a temporary credential from above, note the credential for late
 ### Set up the static site
 In `sites/js/app.js`
 
-Replace
+Replace following `<WebsiteSignInUrl from CDK output>` and `<usersapiEndpoint* from CDK output>` with actual values and save the change
 ```
-var signInUrl = '<Lauch Hosted UI url from above>';
-var apiEndpointUrl = '<API Gateway Endpoint from above>';
+var signInUrl = '<WebsiteSignInUrl from CDK output>';
+var apiEndpointUrl = '<usersapiEndpoint* from CDK output>';
 ```
 
 ### Copy the website static content to bucket
 
-From main folder
+From main folder, please 
 ```
 cd sites
-aws sync . s3://<website bucket from above>/
+aws sync . s3://<WebsiteBucketName from CDK output>/
 ```
 
 ## Test the setup
 
-Please go to  `Launch Hosted UI` from above
+Please go to  `WebsiteSignInUrl from CDK output` from above
 
 Then can use `update nickname` to update nickname
 

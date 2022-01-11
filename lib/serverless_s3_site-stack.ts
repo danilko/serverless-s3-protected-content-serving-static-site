@@ -1,4 +1,4 @@
-import { Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import { Duration, RemovalPolicy, Stack, StackProps, CfnOutput } from 'aws-cdk-lib';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
@@ -71,19 +71,16 @@ export class ServerlessS3SiteStack extends Stack {
     });
     websiteBucket.grantRead(originAccessIdentity);
 
-    // // // Cloudfront frontend for site distription and serving https
-    const websiteDistribution = new cloudfront.CloudFrontWebDistribution(this, 'websiteDistribution', {
-      originConfigs: [
-        {
-          s3OriginSource: {
-            s3BucketSource: websiteBucket,
-            originAccessIdentity: originAccessIdentity
-          },
-          behaviors: [
-            { isDefaultBehavior: true }
-          ]
-        }
-      ],
+    // Cloudfront frontend for site distription and serving https
+    // https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront.CfnDistribution.S3OriginConfigProperty.html
+    // https://docs.aws.amazon.com/cdk/api/v2//docs/aws-cdk-lib.aws_cloudfront.Distribution.html
+    const websiteDistribution = new cloudfront.Distribution(this, 'websiteDistribution', {
+      defaultBehavior: {
+        origin: new cloudfrontOrigins.S3Origin(websiteBucket, {
+          originAccessIdentity: originAccessIdentity
+        }),
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      },
       defaultRootObject: "index.html"
     });
 
@@ -221,5 +218,11 @@ export class ServerlessS3SiteStack extends Stack {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     }); // PUT /
+
+    // Print output
+    new CfnOutput(this, 'WebsiteCognitoUserPoolId', { value: websiteUserPool.userPoolId });
+    new CfnOutput(this, 'WebsiteUrl', { value: webisteOrigin });
+    new CfnOutput(this, 'WebsiteSignInUrl', { value: signInUrl });
+    new CfnOutput(this, 'WebsiteBucketName', { value: websiteBucket.bucketName });
   }
 }
