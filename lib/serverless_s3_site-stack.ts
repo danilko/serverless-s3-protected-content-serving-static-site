@@ -10,7 +10,6 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as path from 'path';
 import { Construct } from 'constructs';
-import * as fs from 'fs';
 import { OriginAccessIdentity } from 'aws-cdk-lib/aws-cloudfront';
 
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -18,14 +17,6 @@ import { OriginAccessIdentity } from 'aws-cdk-lib/aws-cloudfront';
 export class ServerlessS3SiteStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
-
-    // KMS Key for encrpytion entire site
-    // Enable automatic rotation
-    const kmsKey = new kms.Key(this, 'siteEncrpytionKey', {
-      enableKeyRotation: true,
-      removalPolicy: RemovalPolicy.DESTROY,   // When the stack is destroyed, the key is also destroyed
-      pendingWindow: Duration.days(7),      // Retain for 10 days after destroy command
-    });
 
     // https://github.com/aws/aws-sdk-php/issues/1718
     // Bucket to store static website content
@@ -40,8 +31,7 @@ export class ServerlessS3SiteStack extends Stack {
 
     // Bucket to store authorized content
     const contentBucket = new s3.Bucket(this, 'contentBucket', {
-      encryption: s3.BucketEncryption.KMS,
-      encryptionKey: kmsKey,
+      encryption: s3.BucketEncryption.S3_MANAGED,
       publicReadAccess: false,
       enforceSSL: true,                      // Enforce the ssl page
       removalPolicy: RemovalPolicy.DESTROY,   // When the stack is destroyed, the content is also destroyed
@@ -51,8 +41,7 @@ export class ServerlessS3SiteStack extends Stack {
     // const usertable
     const userTable = new dynamodb.Table(this, 'userTable', {
       partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
-      encryption: dynamodb.TableEncryption.CUSTOMER_MANAGED,
-      encryptionKey: kmsKey,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
       billingMode: dynamodb.BillingMode.PROVISIONED,
       removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
     });
@@ -154,8 +143,6 @@ export class ServerlessS3SiteStack extends Stack {
     userEndpointsLambdaIAMRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"));
     // grant dynamodb permission
     userTable.grantReadWriteData(userEndpointsLambdaIAMRole);
-    // kms key permission (so can write to dynamoDB)
-    kmsKey.grantEncryptDecrypt(userEndpointsLambdaIAMRole);
     // S3 bucket grant the permission
     contentBucket.grantReadWrite(userEndpointsLambdaIAMRole);
 
@@ -172,7 +159,6 @@ export class ServerlessS3SiteStack extends Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
       environment: {
         S3_BUCKET_ARN: contentBucket.bucketArn,
-        KMS_KEY_ARN: kmsKey.keyArn,
         USER_TABLE: userTable.tableName,
         CORS_ALLOW_ORIGIN: webisteOrigin
       }
@@ -199,6 +185,15 @@ export class ServerlessS3SiteStack extends Stack {
       requestTemplates: { "application/json": '{ "statusCode": "200" }' }
     });
 
+    // Add users resource for retriving all users
+    const usersResource = userAPI.root.addResource('users');
+    usersResource.addMethod("GET", usersIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+
+    }); // GET /
+
+    // Add user resource for specific user
     const userResource = userAPI.root.addResource('user');
     userResource.addMethod("GET", usersIntegration, {
       authorizer: websiteUserPoolAuth,

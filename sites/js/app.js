@@ -2,8 +2,8 @@
 // This is an very raw sample to test the login
 // This will need clean up + improvement to be ready for production usage
 
-var signInUrl = '<signInUrl>';
-var apiEndpointUrl = '<apiEndpointUrl>';
+var signInUrl = '';
+var apiEndpointUrl = '';
 
 var global = this;
 var user = null;
@@ -64,7 +64,30 @@ function callUserAPI() {
         .then(response => response.json())
         .then(data => {
             userAssetInfo = data;
-            fetchContents();
+            populateUserContent();
+        })
+        .catch((error) => {
+            console.error('Error:', error);
+        });
+}
+
+function GetAllUserAPI(lastEvaluatedId) {
+    // Introduce query for lastEvaluatedId for pagination if one exist
+    var query = lastEvaluatedId ? '?lastEvaluatedId=' + lastEvaluatedId : '';
+    // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+    fetch(apiEndpointUrl + 'users' + query, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': global.user.token_type + ' ' + global.user.id_token
+        }
+    })
+        .then(response => response.json())
+        .then(data => {
+            // Do not clear content if lastEvaluatedId is valid (as this is continous search)
+            // Clear content if lastEvaluatedId is invalid (indicate first search)
+            populateUserContents(data, lastEvaluatedId ? false : true);
         })
         .catch((error) => {
             console.error('Error:', error);
@@ -72,9 +95,10 @@ function callUserAPI() {
 }
 
 
+
 // Reference the users.js from lambda
 // Use the sts token to exchange for S3 presigned url to show on browser and download link
-function fetchContents() {
+function populateUserContent() {
 
     var html = "<div><br/>"
 
@@ -83,13 +107,17 @@ function fetchContents() {
     // Update nickname field as input filed
     html = html + "<div>Nickname: <input type=\"text\" id=\"nickname\" value=\"" + userAssetInfo.nickname + "\"><input type=\"button\" onClick=\"updateNickname()\" value=\"Update Nickname\"></div><br/>"
     html = html + "<div id=\"asset\"></div><br/>"
-    html = html + "<div><label for=\"file\">Choose file to upload: </label><input type=\"file\" id=\"assetFile\" accept=\".png\"><br/><input type=\"button\" onClick=\"uploadAsset()\" value=\"Upload File\"></div>"
+
+    // Only present the field
+    if (userAssetInfo.hasOwnProperty("preSignedPost")) {
+        html = html + "<div><label for=\"file\">Choose file to upload: </label><input type=\"file\" id=\"assetFile\" accept=\".png\"><br/><input type=\"button\" onClick=\"uploadAsset()\" value=\"Upload File\"></div>"
+    }
 
     // finish the div tag
     html = html + "</div>"
 
 
-    document.getElementById('app').innerHTML = html;
+    document.getElementById('app').innerHTML = document.getElementById('app').innerHTML + html;
 
     // Check if image exist
     var assetImage = new Image();
@@ -105,6 +133,43 @@ function fetchContents() {
         // Image DID NOT LOAD
         document.getElementById('asset').innerHTML = "Asset: NO ASSET EXIST, PLEASE UPLOAD"
     }
+}
+
+function populateUserContents(data, clearContent) {
+    var html = "<div>"
+
+    for (var index = 0; index < data.items.length; index++) {
+        var userInfo = data.items[index];
+
+        html = html + "<div id=\"user_" + userInfo.userId + "\">";
+
+        // Update user field
+        html = html + "<div>UserId: " + userInfo.userId + "</div><br/>"
+
+        // Update nickname field as input filed
+        html = html + "<div>Nickname:" + userInfo.nickname + "</div><br/>";
+        html = html + "<div id=\"asset\"><img src=\"" + userInfo.asset.getSignedUrl + "\"></div><br/>";
+
+        // finish the user div tag
+        html = html + "</div><br/>"
+    }
+
+    // finish the div tag
+    html = html + "</div>";
+
+    // Add a next button with last lastEvaluatedId
+    html = html + "<div><input type=\"button\" value =\"Next\" onClick=\"GetAllUserAPI(" + data.lastEvaluatedId + ")\"></div><br/>"
+
+    // Clear previous results 
+    if (clearContent) {
+        // Then just replace whole content
+        document.getElementById('users').innerHTML = html;
+    }
+    else {
+        // Otherwise clear
+        document.getElementById('users').innerHTML = document.getElementById('users').innerHTML + html;
+    }
+
 }
 
 function updateNickname() {
@@ -124,8 +189,8 @@ function updateNickname() {
         },
         body: JSON.stringify(body)
     })
-    .then(response => response.json())
-    .then(data => {
+        .then(response => response.json())
+        .then(data => {
             userAssetInfo.nickname = data.nickname;
             // refresh page
             fetchContents();
@@ -137,26 +202,25 @@ function updateNickname() {
 
 function uploadAsset() {
 
-    console.log("start upload");
     // Reference from https://bobbyhadz.com/blog/notes-s3-signed-url
     const formData = new FormData();
 
-    Object.entries(userAssetInfo.asset.postSignedUrl.fields).forEach(([k, v]) => {
+    Object.entries(userAssetInfo.asset.preSignedPost.fields).forEach(([k, v]) => {
         formData.append(k, v);
     });
 
     formData.append('file', document.getElementById('assetFile').files[0]);
 
     // post data
-   fetch(userAssetInfo.asset.postSignedUrl.url, {
+    fetch(userAssetInfo.asset.preSignedPost.url, {
         method: 'POST',
         body: formData
     })
-    .then(data => {
-     // reload image
-     callUserAPI();
-    })
-    .catch((error) => {
-        console.error('Error:', error);
-    });
+        .then(data => {
+            // reload image
+            callUserAPI();
+        })
+        .catch((error) => {
+            console.error('Error:', error);
+        });
 }
