@@ -46,6 +46,17 @@ export AWS_REGION=us-west-2
 
 ```
 
+Update the `domainPrefix` in `lib/serverless_s3_site-stack.ts` to be unique, such as `appname-website-app` otherwise may face deployment error
+```
+    // domain for cognito hosted endpoint
+    // currently use out of box domain from cognito
+    const websiteCognitDomain = websiteUserPool.addDomain('websiteCognitDomain', {
+      cognitoDomain: {
+        domainPrefix: 'website-app',
+      },
+    });
+```
+
 Deploy the `cdk bootstrap stack` (only need to perform for first time if region change or first time setup)
 ```
 # If first time
@@ -94,7 +105,7 @@ var apiEndpointUrl = '<usersapiEndpoint* from CDK output>';
 From main folder, please 
 ```
 cd sites
-aws sync . s3://<WebsiteBucketName from CDK output>/
+aws s3 sync . s3://<WebsiteBucketName from CDK output>/
 ```
 
 ## Test the setup
