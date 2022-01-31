@@ -2,8 +2,8 @@
 // This is an very raw sample to test the login
 // This will need clean up + improvement to be ready for production usage
 
-var signInUrl = '';
-var apiEndpointUrl = '';
+var signInUrl = 'https://website-app.auth.us-west-2.amazoncognito.com/login?client_id=2ml46sk7qp1v05f0r2drjmp83u&response_type=token&redirect_uri=https://d113m8j3hny519.cloudfront.net';
+var apiEndpointUrl = 'https://bzk3qynyc7.execute-api.us-west-2.amazonaws.com/prod/';
 
 var global = this;
 var user = null;
@@ -43,7 +43,7 @@ function callback(hash) {
     global.user = {
         id_token: searchParams.get('id_token'),
         token_type: searchParams.get('token_type'),
-        expires_in: expiration
+        expiration: expiration
     }
     callUserAPI();
 
