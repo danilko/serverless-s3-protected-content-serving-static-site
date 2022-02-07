@@ -139,7 +139,7 @@ function populateUserContent() {
     html = html + "</div>"
 
 
-    document.getElementById('app').innerHTML = document.getElementById('app').innerHTML + html;
+    document.getElementById('user').innerHTML =  html;
 
     // Check if image exist
     var assetImage = new Image();

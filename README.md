@@ -39,6 +39,13 @@ Install the dependency
 npm install
 ```
 
+Install dependencies for lambda
+```
+cd lambda_layers
+npm install
+cd ..
+```
+
 Setup the [AWS credentials](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html)
 Ensure a region is specified, as the repo does not assume any region
 ```
