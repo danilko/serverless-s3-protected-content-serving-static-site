@@ -12,7 +12,7 @@ const AWS = require('aws-sdk');
 const STS = new AWS.STS();
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
 const s3 = new AWS.S3({ "signatureVersion": "v4" });
-const { uuid } = require('uuidv4');
+const cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
 
 // Set to allow cors origin
 const headers = {
@@ -29,27 +29,28 @@ var maxQuerySize = 10;
 exports.handler = async function (event, context) {
   try {
     // Get user info from request context (it will be present as it passed the API Gateway's authorizer)
-    var username = event.requestContext.authorizer.claims['cognito:username'].toLowerCase();
+    var tokenUserId = event.requestContext.authorizer.claims['cognito:username'].toLowerCase();
 
-    if (event.path == "/users") {
+    if (event.resource == "/users") {
       if (event.httpMethod === "GET") {
-
         // Get the query parameter lastEvaluatedId (if exist)
-        var lastEvaluatedId = null;
-
-        if (event.queryStringParameters && event.queryStringParameters.lastEvaluatedId) {
-          lastEvaluatedId = event.queryStringParameters.lastEvaluatedId;
+        var paginationToken = null;
+        
+        if(event.queryStringParameters && event.queryStringParameters.paginationToken)
+        {
+          paginationToken = event.queryStringParameters.paginationToken;
         }
 
         // Limit to 10 records for now
         // If lastEvaluatedId is not present, will get the first pagination
         // Otherwise use the lastEvaluatedId field to try processing pagination
-        var response = await getUsers(maxQuerySize, lastEvaluatedId);
+        var response = await getUsers(maxQuerySize, paginationToken);
 
         // Loop through all items to add asset download link
-        for (var index = 0; index < response.items.length; index++) {
+        for (var index = 0; index < response.users.length; index++) {
+
           // In get all query, will not send presignedurl for asset upload, only get, so third query is always false
-          response.items[index].asset = await getAssetObject(response.items[index].userId, response.items[index].asset, false);
+          response.users[index].asset = await getAssetObject(response.users[index].userId, 'image.png', false);
         }
 
         return {
@@ -61,40 +62,35 @@ exports.handler = async function (event, context) {
       }
     }
     // This clause will only deal with specific user modification
-    else if (event.path.indexOf("/user/" === 0)) {
-      var targetModifiedUserId = event.path.replace("/user/", "").toLowerCase();
+    else if (event.resource == "/user/{userId}") {
+
+      const { userId } = event.pathParameters;
+
+      var user = await getUser(userId);
+
+      if (!user) {
+        return {
+          statusCode: 404,
+          headers: headers,
+          body: JSON.stringify(userId)
+        };
+      }
 
       if (event.httpMethod === "GET") {
-        // If target field is empty, current logic assume it means to use current user
-        if (targetModifiedUserId == "") {
-          targetModifiedUserId = username;
-        }
-
-        var record = await getUser(targetModifiedUserId);
-
-        // This record does not exist, but the token did exist, and is looking for this user
-        // This is likely first time user visist site
-        if (!record && targetModifiedUserId == username) {
-          // Create a record as this user does not exist before (this logic may be replaced in future through sign up logic)
-          record = createUpdateUser(username, "default", "user.png");
-        }
-
         // Get Asset link
         // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
         // Inject a new asset field
-        record.asset = await getAssetObject(username, record.asset, username == targetModifiedUserId);
+        user.asset = await getAssetObject(user.id, 'image.png', user.id == tokenUserId);
 
         return {
           statusCode: 200,
-          // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
           headers: headers,
-          body: JSON.stringify(record)
+          body: JSON.stringify(user)
         };
-
       }
       else if (event.httpMethod === "PUT") {
-        // Currently only user can modify its own profile
-        if (targetModifiedUserId != username) {
+        // Only user can modify its own profile
+        if (user.userId != tokenUserId) {
           return {
             statusCode: 403,
             headers: headers,
@@ -105,7 +101,7 @@ exports.handler = async function (event, context) {
         var input = JSON.parse(event.body);
 
         // check if empty or undefined, can add other check as needed
-        if (input.nickname === "") {
+        if (!input.nickname || input.nickname == "" || !input.profile) {
           return {
             statusCode: 400,
             headers: headers,
@@ -113,31 +109,23 @@ exports.handler = async function (event, context) {
           };
         }
 
-        // Check if such record exist
-        var record = await getUser(username);
+        // Currently only allow to update following fields
+        user.nickname = input.nickname;
+        user.profile = input.profile;
 
-        // If record is invalid, return 404 as user not found
-        if (!record) {
-          return {
-            statusCode: 404,
-            headers: headers,
-            body: "Invalid user"
-          };
-        }
+        await updateUser(user);
 
-        // If exist, modify the target field
-        record = await createUpdateUser(record.userId, input.nickname, record.asset);
+        user = await getUser(userId);
 
         // Get Asset link
         // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
         // Inject a new asset field
-        record.asset = await getAssetObject(record.userId, record.asset, record.userId == targetModifiedUserId);
+        user.asset = await getAssetObject(user.id, 'image.png', user.id == tokenUserId);
 
         return {
           statusCode: 200,
-          // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
           headers: headers,
-          body: JSON.stringify(record)
+          body: JSON.stringify(user)
         };
       }
     }
@@ -158,83 +146,127 @@ exports.handler = async function (event, context) {
   }
 }
 
+
 /**
- * Get a record based on input username
+ * Get all users
  * @param {*} username The input username to be searched 
  * @returns a user object if username found, if not found will return undefined
  */
-var getUsers = async function (pageSize, lastEvaluatedId) {
-  // Reference https://stackoverflow.com/questions/56074919/dynamo-db-pagination
+var getUsers = async function (pageSize, paginationToken) {
+  // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CognitoIdentityServiceProvider.html#listUsers-property
   var params = {
-    TableName: process.env.USER_TABLE,
-    Limit: pageSize
+    UserPoolId: process.env.COGNITO_POOL_ID,
+    Limit: pageSize,
   };
-  if (lastEvaluatedId) {
-    params.ExclusiveStartKey = { item_id: lastEvaluatedId };
+
+  if (paginationToken) {
+    params.PaginationToken = paginationToken;
   }
 
-  try {
-    var response = await dynamoDB
-      .scan(params)
-      .promise();
+  var response = await cognitoidentityserviceprovider.listUsers(params).promise();
+  var responseUsers = [];
+  var paginationToken = null;
+  
+      console.log(JSON.stringify(response));
+  if (response && response.Users) {
 
-    return {
-      items: response.Items,
-      lastEvaluatedId: response.LastEvaluatedKey
+
+
+    // Message to not return too much info for each user
+    for (var index = 0; index < response.Users.length; index++) {
+
+      // Loop through array of map to find given attributes
+      var nickname = null;
+      var profile = null;
+      response.Users[index].Attributes.forEach(element => {
+        if (element.Name == 'nickname') {
+          nickname = element.Value;
+        }
+        else if (element.Name == 'profile') {
+          profile = element.Value;
+        }
+      });
+
+      responseUsers.push({
+        userId: response.Users[index].Username,
+        userCreateDate: response.Users[index].UserCreateDate,
+        nickname: nickname,
+        profile: profile,
+      })
+
+      paginationToken = response.PaginationToken;
+    }
+  }
+  
+      return {
+      users: responseUsers,
+      paginationToken: paginationToken
     };
-  } catch (error) {
-    throw error;
-  }
 }
 
 /**
- * Get a record based on input username
- * @param {*} username The input username to be searched 
- * @returns a user object if username found, if not found will return undefined
+ * Get a record based on input userId
+ * @param {*} user The target user to be updated 
  */
-var getUser = async function (username) {
-  let userRecord = await dynamoDB
-    .get({
-      TableName: process.env.USER_TABLE,
-      Key: {
-        "userId": username
-      }
-    })
-    .promise();
+ var updateUser = async function (user) {
+  var params = {
+    UserAttributes: [
+      {
+        Name: 'nickname',
+        Value: user.nickname,
+        Name: 'profile',
+        Value: user.nickname
+      },
+      /* more items */
+    ],
+    UserPoolId: process.env.COGNITO_POOL_ID,
+    Username: user.userId, 
+  };
+  cognitoidentityserviceprovider.adminUpdateUserAttributes(params, function(err, data) {
+    if (err) console.log(err, err.stack); // an error occurred
+    else     console.log(data);           // successful response
+  });
 
-  return userRecord.Item;
+  await cognitoidentityserviceprovider.adminGetUser(params).promise();
 };
 
 /**
- * Modify or create a user record base on username
- * @param {*} username Target username to be modified
- * @param {*} nickname nickname field for target username to be modified
- * @param {*} asset asset field for target username to be modified
- * @returns record
+ * Get a record based on input userId
+ * @param {*} userId The input userId to be searched 
+ * @returns a user object if username found, if not found will return undefined
  */
-var createUpdateUser = async function (username, nickname, asset) {
-  // update dynamodb with default values
-  var userRecord = await dynamoDB
-    .update({
-      TableName: process.env.USER_TABLE,
-      Key: {
-        "userId": username
-      },
-      UpdateExpression: "set #nickname = :nickname, #asset = :asset",
-      ExpressionAttributeNames: {
-        "#nickname": "nickname",
-        "#asset": "asset"
-      },
-      ExpressionAttributeValues: {
-        ":nickname": nickname,
-        ":asset": asset
-      },
-      ReturnValues: "ALL_NEW"
-    }).promise();
+var getUser = async function (userId) {
+  // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CognitoIdentityServiceProvider.html#getUser-property
+  var params = {
+    UserPoolId: process.env.COGNITO_POOL_ID,
+    Username: userId
+  };
 
-  // Item return in here will be Attributes, not field
-  // {"Attributes": {//fields}}
-  return userRecord.Attributes;
+  var user = await cognitoidentityserviceprovider.adminGetUser(params).promise();
+
+  if (user) {
+    // Clean up the user attribute to limit return fields
+    // Loop through array of map to find given attributes
+    var nickname = null;
+    var profile = null;
+    user.UserAttributes.forEach(element => {
+      if (element.Name == 'nickname') {
+        nickname = element.Value;
+      }
+      else if (element.Name == 'profile') {
+        profile = element.Value;
+      }
+    });
+
+    return {
+      userId: user.Username,
+      nickname: nickname,
+      profile: profile,
+      userCreateDate: user.UserCreateDate
+    }
+  }
+
+  return null;
 };
 
 /**

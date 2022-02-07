@@ -29,22 +29,31 @@ var maxQuerySize = 10;
 exports.handler = async function (event, context) {
   try {
     // Get user info from request context (it will be present as it passed the API Gateway's authorizer)
-    var username = event.requestContext.authorizer.claims['cognito:username'].toLowerCase();
+    var userId = event.requestContext.authorizer.claims['cognito:username'].toLowerCase();
 
-    if (event.path == "/products") {
+    if (event.resource == "/products") {
       if (event.httpMethod === "GET") {
 
         // Get the query parameter lastEvaluatedId (if exist)
         var lastEvaluatedId = null;
+        var createdBy = null;
 
-        if (event.queryStringParameters && event.queryStringParameters.lastEvaluatedId) {
-          lastEvaluatedId = event.queryStringParameters.lastEvaluatedId;
+        if (event.queryStringParameters) {
+          if(event.queryStringParameters.lastEvaluatedId)
+          {
+            paginationTolastEvaluatedIdken = event.queryStringParameters.lastEvaluatedId;
+          }
+          if(event.queryStringParameters.createdBy)
+          {
+            createdBy = event.queryStringParameters.createdBy;
+          }
         }
 
         // Limit to 10 records for now
         // If lastEvaluatedId is not present, will get the first pagination
         // Otherwise use the lastEvaluatedId field to try processing pagination
-        var response = await getProducts(maxQuerySize, lastEvaluatedId);
+        // If createdBy present, will search products createdBy
+        var response = await getProducts(maxQuerySize, createdBy, lastEvaluatedId);
 
         return {
           statusCode: 200,
@@ -55,128 +64,126 @@ exports.handler = async function (event, context) {
       }
     }
     // This clause will only deal with specific user modification
-    else if (event.path.indexOf("/product/" === 0)) {
-      var targetProductId = event.path.replace("/product/", "").toLowerCase();
+    else if (event.resource == "/product/{productId}") {
+      var { productId } = event.pathParameters;
+
+      var product = await getProduct(productId);
+
+      if (!product) {
+        return {
+          // not found, return 404
+          statusCode: 404,
+          // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
+          headers: headers,
+          body: JSON.stringify({ "error": "product not found" })
+        };
+      }
 
       if (event.httpMethod === "GET") {
-        var record = await getProduct(targetProductId);
 
-        if (!record) {
-          return {
-            // not found, return 404
-            statusCode: 404,
-            // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
-            headers: headers,
-            body: JSON.stringify({"error": "product not found"})
-          };
-        }
-
-        record['sampleasset'] = await getAssetObject(record.productId, record.sampleasset, record.createdBy == username);
+        product['sampleasset'] = await getAssetObject(product.id, product.sampleasset, product.createdBy == userId);
 
         return {
           statusCode: 200,
           // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
           headers: headers,
-          body: JSON.stringify(record)
+          body: JSON.stringify(product)
         };
 
       }
       // Update existing product
       else if (event.httpMethod === "PUT") {
-        var targetModifiedproductId = event.path.replace("/product/", "").toLowerCase();
-
-        var record = await getProduct(targetModifiedproductId);
-
-        if (!record) {
-          return {
-            // not found, return 404
-            statusCode: 404,
-            // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
-            headers: headers,
-            body: JSON.stringify({"error": "product not found"})
-          };
-        }
-
         // Currently only user can modify its own product
-        if (record.createdBy != username) {
+        if (product.createdBy != userId) {
           return {
             statusCode: 403,
             headers: headers,
-            body: JSON.stringify({"error": "uauthorized"})
+            body: JSON.stringify({ "error": "uauthorized" })
           };
         }
 
         var input = JSON.parse(event.body);
 
-        // Currently only user can modify its own product
-        if (!record.name || !record.desciption || record.price || !isNaN(record.price)) {
+        // Check for input
+        if (!input.name || !input.desciption || input.price || !isNaN(input.price)) {
           return {
             statusCode: 400,
             headers: headers,
-            body: JSON.stringify({"error": "invalid input"})
+            body: JSON.stringify({ "error": "invalid input" })
           };
         }
 
-
         // Update only description, price and name for now
         // Should need to do more regex clean up if needed
-        record.name = input.name;
-        record.desciption  = input.desciption;
-        record.price  = input.price;
+        product.name = input.name;
+        product.desciption = input.desciption;
+        product.price = input.price;
 
         // Update timestampe and revision
-        record.lastModfiedTS = Date.now();
-        record.revision = uuid();
-        
+        product.lastModfiedTS = Date.now();
+        product.revisionId = uuid();
+
         // Note, depend on use case, may want to back up this revision before update (like to S3 or another dynamo table) for audit reason etc
 
         // If exist, modify the target field
-        record = await createUpdateProduct(record);
+        product = await createUpdateProduct(product);
 
         // Get Asset link
         // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
         // Inject a new asset field
-        record['sampleasset'] = await getAssetObject(record.productId, product.sampleasset, record.createdBy == username);
+        product['sampleasset'] = await getAssetObject(product.id, product.sampleasset, product.createdBy == userId);
 
         return {
           statusCode: 200,
           // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
           headers: headers,
-          body: JSON.stringify(record)
+          body: JSON.stringify(product)
         };
       }
       // Create a new product
-      else if (event.httpMethod === "POST") {
-        var input = JSON.parse(event.body);
+      // This clause will only deal with specific user modification
+      else if (event.resource == "/product") {
+        if (event.httpMethod === "POST") {
+          var input = JSON.parse(event.body);
 
-        // Update only description and name for now
-        // Should need to do more regex clean up if needed
-        var newRecord = {
-          "productId" : uuid(),
-          "name": input.name,
-          "desciption": input.desciption,
-          "revision": uuid(),
-          "price": parseFloat(input.price),
-          "lastModfiedTS": Date.now(),
-          "createdTS": Date.now(),
-          "createdBy": username
-        };
+          // Check for input
+          if (!input.name || !input.desciption || input.price || !isNaN(input.price)) {
+            return {
+              statusCode: 400,
+              headers: headers,
+              body: JSON.stringify({ "error": "invalid input" })
+            };
+          }
 
-        // In this case, as productId is primary key of dynamoDB, so dynamoDB will error out if the key is already used
-        record = await createUpdateProduct(newRecord);
+          // Update only description and name for now
+          // Should need to do more regex clean up if needed
+          var newProduct = {
+            "id": uuid(),
+            "name": input.name,
+            "desciption": input.desciption,
+            "revisionId": uuid(),
+            "price": parseFloat(input.price),
+            "sampleasset": "asset.png",
+            "lastModfiedTS": Date.now(),
+            "createdTS": Date.now(),
+            "createdBy": userId
+          };
 
-        // Get Asset link
-        // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
-        // Inject a new asset field
-        record['sampleasset'] = await getAssetObject(record.productId, product.sampleasset, record.createdBy == username);
+          // In this case, as productId is primary key of dynamoDB, so dynamoDB will error out if the key is already used
+          var product = await createUpdateProduct(newProduct);
 
-        return {
-          statusCode: 200,
-          // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
-          headers: headers,
-          body: JSON.stringify(record)
-        };
-      };
+          // Get Asset link
+          // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
+          // Inject a new asset field
+          product['sampleasset'] = await getAssetObject(product.productId, product.sampleasset, product.createdBy == userId);
+
+          return {
+            statusCode: 200,
+            headers: headers,
+            body: JSON.stringify(product)
+          };
+        }
+      }
     }
 
     // We only accept PUT and GET for now
@@ -196,18 +203,31 @@ exports.handler = async function (event, context) {
 }
 
 /**
- * Get a record based on input username
- * @param {*} username The input username to be searched 
+ * Get all products
+ * @param {*} pageSIze The max page size to be searched
+ * @param {*} createdBy If passed in as no null value, will return search by given createdBy
+ * @param {*} lastEvaluatedId The lastEvaluatedId to continue to search from
  * @returns a user object if username found, if not found will return undefined
  */
-var getProducts = async function (pageSize, lastEvaluatedId) {
+var getProducts = async function (pageSize, createdBy, lastEvaluatedId) {
   // Reference https://stackoverflow.com/questions/56074919/dynamo-db-pagination
   var params = {
     TableName: process.env.PRODUCT_TABLE,
     Limit: pageSize
   };
+
   if (lastEvaluatedId) {
     params.ExclusiveStartKey = { item_id: lastEvaluatedId };
+  }
+
+  if (createdBy) {
+    params.KeyConditionExpression = "#createdBy = :createdBy";
+    params.ExpressionAttributeNames = {
+      "#createdBy": "createdBy",
+    };
+    params.ExpressionAttributeValues = {
+      ":createdBy": createdBy
+    };
   }
 
   try {
@@ -234,7 +254,7 @@ var getProduct = async function (productId) {
     .get({
       TableName: process.env.PRODUCT_TABLE,
       Key: {
-        "productId": productId
+        "id": productId
       }
     })
     .promise();
@@ -244,8 +264,7 @@ var getProduct = async function (productId) {
 
 /**
  * Modify or create a productId record base on username
- * @param {*} username Target productId to be modified
- * @param {*} nickname nickname field for target username to be modified
+ * @param {*} product Target product to be modified
  * @param {*} asset asset field for target username to be modified
  * @returns record
  */
@@ -255,24 +274,24 @@ var createUpdateProduct = async function (product) {
     .update({
       TableName: process.env.USER_TABLE,
       Key: {
-        "productId": product.productId
+        "id": product.id
       },
-      UpdateExpression: "set #name = :name, #description = :description, #price = :price, #sampleasset = :sampleasset, #revision = :revision, #lastModfiedTS = :lastModfiedTS, #createdTS = :createdTS",
+      UpdateExpression: "set #name = :name, #description = :description, #price = :price, #sampleasset = :sampleasset, #revisionId = :revisionId, #lastModfiedTS = :lastModfiedTS, #createdTS = :createdTS",
       ExpressionAttributeNames: {
         "#name": "name",
         "#description": "description",
         "#price": "price",
         "#sampleasset": "sampleasset",
-        "#revision": "revision",
+        "#revisionId": "revisionId",
         "#lastModfiedTS": "lastModfiedTS",
         "#createdTS": "createdTS"
       },
       ExpressionAttributeValues: {
         ":name": product.name,
         ":description": product.description,
-        ":description": parseFloat(product.price),
-        ":sampleasset": '/sampleasset',
-        ":revision": product.revision,
+        ":price": parseFloat(product.price),
+        ":sampleasset": product.sampleasset,
+        ":revisionId": product.revisionId,
         ":lastModfiedTS": product.lastModfiedTS,
         ":createdTS": product.createdTS
       },

@@ -38,24 +38,9 @@ export class ServerlessS3SiteStack extends Stack {
       autoDeleteObjects: true, // NOT recommended for production code
     });
 
-    // const usertable
-    const userTable = new dynamodb.Table(this, 'userTable', {
-      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      billingMode: dynamodb.BillingMode.PROVISIONED,
-      removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
-    });
-
-    // Add per minute capacity (per second) 
-    // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html
-    userTable.autoScaleWriteCapacity({
-      minCapacity: 1,
-      maxCapacity: 10,
-    }).scaleOnUtilization({ targetUtilizationPercent: 75 });
-
     // const product table
     const productTable = new dynamodb.Table(this, 'productTable', {
-      partitionKey: { name: 'productId', type: dynamodb.AttributeType.STRING },
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       billingMode: dynamodb.BillingMode.PROVISIONED,
       removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
@@ -70,7 +55,7 @@ export class ServerlessS3SiteStack extends Stack {
 
     // const product table
     const orderTable = new dynamodb.Table(this, 'orderTable', {
-      partitionKey: { name: 'orderId', type: dynamodb.AttributeType.STRING },
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       billingMode: dynamodb.BillingMode.PROVISIONED,
       removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
@@ -104,7 +89,7 @@ export class ServerlessS3SiteStack extends Stack {
     });
 
     const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName;
-    //const webisteOrigin = 'http://localhost:8080';
+    // const webisteOrigin = 'http://localhost:8080';
 
     // Add CORS to allow the cloudfront website to access the content bucket
     // Currently enable GET/POST/PUT/DELETE to retrieve and update content
@@ -117,8 +102,30 @@ export class ServerlessS3SiteStack extends Stack {
 
     // AWS Cognito for securing website endpoint
     const websiteUserPool = new cognito.UserPool(this, 'website-userpool', {
-      userPoolName: 'website-userpool',
+      userPoolName: 'website-cognito-userpool',
       selfSignUpEnabled: true,
+      standardAttributes: {
+        email: {
+          required: true,
+          mutable: true
+        },
+        nickname: {
+          required: true,
+          mutable: true,
+        },
+        givenName: {
+          required: true,
+          mutable: true,
+        },
+        familyName: {
+          required: true,
+          mutable: true,
+        },
+      },
+      customAttributes: {
+        accountStatus: new cognito.StringAttribute({ mutable: true }),
+        accountType: new cognito.StringAttribute({ mutable: true })
+      },
       removalPolicy: RemovalPolicy.DESTROY,  // When the stack is destroyed, the pool and its info are also destroyed
       userVerification: {
         emailSubject: 'Verify your email for our webiste!',
@@ -127,22 +134,22 @@ export class ServerlessS3SiteStack extends Stack {
         smsMessage: 'Thanks for signing up to our webiste! Your verification code is {####}',
       },
       // https://docs.aws.amazon.com/cdk/api/v1/docs/aws-cognito-readme.html
-      signInAliases: {            // Allow emailand username to be used as sign in alias, please note it can only be configured at initial setup
-        username: true,
+      signInAliases: {            // Allow email as sign up alias please note it can only be configured at initial setup
         email: true
       },
-      autoVerify: { email: true }  // Auto verify email
+      autoVerify: { email: true },  // Auto verify email
+      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
     });
-
 
     // Setup a client for website client
     const websiteAppClient = websiteUserPool.addClient('website-app-client', {
+      accessTokenValidity: Duration.minutes(60), // Token lifetime
+      generateSecret: false,
       preventUserExistenceErrors: true,    // Prevent user existence error to further secure (so will not notify that username exist or not)
       oAuth: {
         flows: {
           implicitCodeGrant: true, // Use implict grant in this case, as the website does not have a backend
         },
-
         scopes: [cognito.OAuthScope.OPENID],
         callbackUrls: [webisteOrigin],  // For callback and logout, go back to the website
         logoutUrls: [webisteOrigin],
@@ -154,7 +161,7 @@ export class ServerlessS3SiteStack extends Stack {
     const websiteCognitDomain = websiteUserPool.addDomain('websiteCognitDomain', {
       cognitoDomain: {
         domainPrefix: 'website-app',
-      },
+      }
     });
 
     // Setup login Url
@@ -176,8 +183,18 @@ export class ServerlessS3SiteStack extends Stack {
 
     // Add basic lambda role
     userEndpointsLambdaIAMRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"));
-    // grant dynamodb permission
-    userTable.grantReadWriteData(userEndpointsLambdaIAMRole);
+
+    // Add permissions to allow lambda to list and modify (to update account status etc)
+    const cognitoPolicy = new iam.Policy(this, 'cognito-modification', {
+      statements: [
+        new iam.PolicyStatement({
+          actions: ['cognito-idp:AdminUpdateUserAttributes', 'cognito-idp:ListUsers', 'cognito-idp:AdminGetUser' ],
+          resources: [websiteUserPool.userPoolArn]
+        })
+      ]
+    });
+    userEndpointsLambdaIAMRole.attachInlinePolicy(cognitoPolicy);
+
     // S3 bucket grant the permission
     contentBucket.grantReadWrite(userEndpointsLambdaIAMRole);
 
@@ -188,13 +205,13 @@ export class ServerlessS3SiteStack extends Stack {
       runtime: lambda.Runtime.NODEJS_14_X,
       role: userEndpointsLambdaIAMRole,
       architecture: lambda.Architecture.ARM_64,    // Use ARM_64 to save cost, but may need to tweak base on future lambda function content
-      handler: 'products.handler',                    // The users.js is the entry point, so set it as handler
+      handler: 'users.handler',                    // The users.js is the entry point, so set it as handler
       timeout: Duration.seconds(2),                       // Maximum 2s timeout
       code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
       layers: [lambdaLayer],
       environment: {
         S3_BUCKET_ARN: contentBucket.bucketArn,
-        USER_TABLE: userTable.tableName,
+        COGNITO_POOL_ID: websiteUserPool.userPoolId,
         CORS_ALLOW_ORIGIN: webisteOrigin
       }
     });
@@ -256,7 +273,7 @@ export class ServerlessS3SiteStack extends Stack {
       }
     });
 
-    const websiteUserPoolAuth = new apigateway.CognitoUserPoolsAuthorizer(this, 'booksAuthorizer', {
+    const websiteUserPoolAuth = new apigateway.CognitoUserPoolsAuthorizer(this, 'cognitoAuthorizer', {
       cognitoUserPools: [websiteUserPool]
     });
 
@@ -288,11 +305,6 @@ export class ServerlessS3SiteStack extends Stack {
 
     // Add user resource for specific user
     const userResource = serviceAPI.root.addResource('user');
-    userResource.addMethod("GET", usersIntegration, {
-      authorizer: websiteUserPoolAuth,
-      authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // GET /
-
     const userIDResource = userResource.addResource('{userId}');
 
     // Integrate with users API
@@ -320,12 +332,12 @@ export class ServerlessS3SiteStack extends Stack {
 
     // Add users resource for retriving all users
     const productResource = serviceAPI.root.addResource('product');
-    productResource.addMethod("GET", productsIntegration, {
+    productResource.addMethod("POST", productsIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     }); // GET /
 
-    const productIDResource = userResource.addResource('{productId}');
+    const productIDResource = productResource.addResource('{productId}');
     // Integrate with product API
     // Utilize the cognito pool authorizer
     // https://docs.aws.amazon.com/cdk/api/v1/docs/aws-apigateway-readme.html#authorizers
@@ -349,31 +361,31 @@ export class ServerlessS3SiteStack extends Stack {
 
     // Add products resource for retriving all products belong to given user
     const ordersResource = serviceAPI.root.addResource('orders');
-    ordersResource.addMethod("GET", productsIntegration, {
+    ordersResource.addMethod("GET", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     }); // GET /
 
     // Add users resource for retriving all users
     const orderResource = serviceAPI.root.addResource('order');
-    orderResource.addMethod("GET", productsIntegration, {
+    orderResource.addMethod("POST", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     }); // GET /
 
-    const orderIDResource = userResource.addResource('{orderId}');
+    const orderIDResource = orderResource.addResource('{orderId}');
     // Integrate with product API
     // Utilize the cognito pool authorizer
     // https://docs.aws.amazon.com/cdk/api/v1/docs/aws-apigateway-readme.html#authorizers
-    orderIDResource.addMethod("GET", productsIntegration, {
+    orderIDResource.addMethod("GET", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     }); // GET /
-    orderIDResource.addMethod("POST", productsIntegration, {
+    orderIDResource.addMethod("POST", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     }); // POST /
-    orderIDResource.addMethod("PUT", productsIntegration, {
+    orderIDResource.addMethod("PUT", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     }); // PUT /

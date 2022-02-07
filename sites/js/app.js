@@ -2,13 +2,14 @@
 // This is an very raw sample to test the login
 // This will need clean up + improvement to be ready for production usage
 
-var signInUrl = 'https://website-app.auth.us-west-2.amazoncognito.com/login?client_id=2ml46sk7qp1v05f0r2drjmp83u&response_type=token&redirect_uri=https://d113m8j3hny519.cloudfront.net';
-var apiEndpointUrl = 'https://bzk3qynyc7.execute-api.us-west-2.amazonaws.com/prod/';
+var signInUrl = '';
+var apiEndpointUrl = '';
+
+var oauth2Endpoint = 'https://' + (new URL(signInUrl)).hostname + '/';
 
 var global = this;
 var user = null;
-var userAssetInfo = null;
-
+var userInfo = null;
 
 function router() {
     const url = new URL(window.location.href)
@@ -42,18 +43,36 @@ function callback(hash) {
 
     global.user = {
         id_token: searchParams.get('id_token'),
+        access_token: searchParams.get('access_token'),
         token_type: searchParams.get('token_type'),
         expiration: expiration
     }
-    callUserAPI();
+
+    // Get user info
+    fetch(oauth2Endpoint + '/oauth2/userInfo', {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': global.user.token_type + ' ' + global.user.access_token
+        }
+    })
+        .then(response => response.json())
+        .then(data => {
+            GetUser(data.username);
+        })
+        .catch((error) => {
+            console.error('Error:', error);
+        });
 
     // Clean the url header
     window.history.pushState("", "Test", "/");
 }
 
-function callUserAPI() {
+
+function GetUser(userId) {
     // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-    fetch(apiEndpointUrl + 'user/', {
+    fetch(apiEndpointUrl + 'user/' + userId, {
         method: 'GET',
         credentials: 'include',
         headers: {
@@ -63,17 +82,18 @@ function callUserAPI() {
     })
         .then(response => response.json())
         .then(data => {
-            userAssetInfo = data;
+            global.userAssetInfo = data;
             populateUserContent();
         })
         .catch((error) => {
             console.error('Error:', error);
         });
+
 }
 
-function GetAllUserAPI(lastEvaluatedId) {
-    // Introduce query for lastEvaluatedId for pagination if one exist
-    var query = lastEvaluatedId ? '?lastEvaluatedId=' + lastEvaluatedId : '';
+function GetAllUserAPI(paginationToken) {
+    // Introduce query for paginationToken for pagination if one exist
+    var query = paginationToken ? '?paginationToken=' + paginationToken : '';
     // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
     fetch(apiEndpointUrl + 'users' + query, {
         method: 'GET',
@@ -86,8 +106,8 @@ function GetAllUserAPI(lastEvaluatedId) {
         .then(response => response.json())
         .then(data => {
             // Do not clear content if lastEvaluatedId is valid (as this is continous search)
-            // Clear content if lastEvaluatedId is invalid (indicate first search)
-            populateUserContents(data, lastEvaluatedId ? false : true);
+            // Clear content if paginationToken is invalid (indicate first search)
+            populateUserContents(data, paginationToken ? false : true);
         })
         .catch((error) => {
             console.error('Error:', error);
@@ -105,7 +125,9 @@ function populateUserContent() {
     // Update user field
     html = html + "<div>UserId: " + userAssetInfo.userId + "</div><br/>"
     // Update nickname field as input filed
-    html = html + "<div>Nickname: <input type=\"text\" id=\"nickname\" value=\"" + userAssetInfo.nickname + "\"><input type=\"button\" onClick=\"updateNickname()\" value=\"Update Nickname\"></div><br/>"
+    html = html + "<div>Nickname: <input type=\"text\" id=\"nickname\" value=\"" + userAssetInfo.nickname + "\"></div><br/>";
+    html = html + "<div>Profile: <input type=\"text\" id=\"profile\" value=\"" + userAssetInfo.profile + "\"></div><br/>";
+    html = html + "<input type=\"button\" onClick=\"updateUserInfo()\" value=\"Update User Info\">";
     html = html + "<div id=\"asset\"></div><br/>"
 
     // Only present the field
@@ -157,8 +179,8 @@ function populateUserContents(data, clearContent) {
     // finish the div tag
     html = html + "</div>";
 
-    // Add a next button with last lastEvaluatedId
-    html = html + "<div><input type=\"button\" value =\"Next\" onClick=\"GetAllUserAPI(" + data.lastEvaluatedId + ")\"></div><br/>"
+    // Add a next button with last paginationToken
+    html = html + "<div><input type=\"button\" value =\"Next\" onClick=\"GetAllUserAPI(" + data.paginationToken + ")\"></div><br/>"
 
     // Clear previous results 
     if (clearContent) {
@@ -172,10 +194,11 @@ function populateUserContents(data, clearContent) {
 
 }
 
-function updateNickname() {
+function updateUserInfo() {
     // get the value
     var body = {
-        nickname: document.getElementById('nickname').value
+        nickname: document.getElementById('nickname').value,
+        profile: document.getElementById('profile').value
     }
 
     // Update content
@@ -191,9 +214,8 @@ function updateNickname() {
     })
         .then(response => response.json())
         .then(data => {
-            userAssetInfo.nickname = data.nickname;
-            // refresh page
-            fetchContents();
+            global.userAssetInfo = data;
+            populateUserContent();
         })
         .catch((error) => {
             console.error('Error:', error);
