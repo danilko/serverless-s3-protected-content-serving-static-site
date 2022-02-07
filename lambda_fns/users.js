@@ -80,7 +80,7 @@ exports.handler = async function (event, context) {
         // Get Asset link
         // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
         // Inject a new asset field
-        user.asset = await getAssetObject(user.id, 'image.png', user.id == tokenUserId);
+        user.asset = await getAssetObject(user.id, 'image.png', user.userId == tokenUserId);
 
         return {
           statusCode: 200,
@@ -120,7 +120,7 @@ exports.handler = async function (event, context) {
         // Get Asset link
         // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
         // Inject a new asset field
-        user.asset = await getAssetObject(user.id, 'image.png', user.id == tokenUserId);
+        user.asset = await getAssetObject(user.id, 'image.png', user.userId == tokenUserId);
 
         return {
           statusCode: 200,
