@@ -53,6 +53,36 @@ export class ServerlessS3SiteStack extends Stack {
       maxCapacity: 10,
     }).scaleOnUtilization({ targetUtilizationPercent: 75 });
 
+    // const product table
+    const productTable = new dynamodb.Table(this, 'productTable', {
+      partitionKey: { name: 'productId', type: dynamodb.AttributeType.STRING },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      billingMode: dynamodb.BillingMode.PROVISIONED,
+      removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
+    });
+
+    // Add per minute capacity (per second) 
+    // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html
+    productTable.autoScaleWriteCapacity({
+      minCapacity: 1,
+      maxCapacity: 10,
+    }).scaleOnUtilization({ targetUtilizationPercent: 75 });
+
+    // const product table
+    const orderTable = new dynamodb.Table(this, 'orderTable', {
+      partitionKey: { name: 'orderId', type: dynamodb.AttributeType.STRING },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      billingMode: dynamodb.BillingMode.PROVISIONED,
+      removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
+    });
+
+    // Add per minute capacity (per second) 
+    // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html
+    orderTable.autoScaleWriteCapacity({
+      minCapacity: 1,
+      maxCapacity: 10,
+    }).scaleOnUtilization({ targetUtilizationPercent: 75 });
+
     // Crate origin access identity (need for kms encrpyted bucket)
     // https://stackoverflow.com/questions/60905976/cloudfront-give-access-denied-response-created-through-aws-cdk-python-for-s3-buc
     const originAccessIdentity = new OriginAccessIdentity(this, "originAccessIdentity", {
@@ -72,8 +102,6 @@ export class ServerlessS3SiteStack extends Stack {
       },
       defaultRootObject: "index.html"
     });
-
-
 
     const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName;
     //const webisteOrigin = 'http://localhost:8080';
@@ -134,6 +162,13 @@ export class ServerlessS3SiteStack extends Stack {
       redirectUri: webisteOrigin, // must be a URL configured under 'callbackUrls' with the client
     });
 
+    // Use a lmbda layer to store all shared library and while keep the distinct code small
+    const lambdaLayer = new lambda.LayerVersion(this, 'LibraryLayer', {
+      removalPolicy: RemovalPolicy.DESTROY,
+      code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_layers')),
+      compatibleArchitectures: [lambda.Architecture.ARM_64],
+    });
+
     // IAM role for Lambda
     const userEndpointsLambdaIAMRole = new iam.Role(this, 'userEndpointsLambdaIAMRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -146,7 +181,6 @@ export class ServerlessS3SiteStack extends Stack {
     // S3 bucket grant the permission
     contentBucket.grantReadWrite(userEndpointsLambdaIAMRole);
 
-
     // Reference https://docs.aws.amazon.com/cdk/v2/guide/serverless_example.html
 
     // Lambda endpoint
@@ -154,12 +188,70 @@ export class ServerlessS3SiteStack extends Stack {
       runtime: lambda.Runtime.NODEJS_14_X,
       role: userEndpointsLambdaIAMRole,
       architecture: lambda.Architecture.ARM_64,    // Use ARM_64 to save cost, but may need to tweak base on future lambda function content
-      handler: 'users.handler',                    // The users.js is the entry point, so set it as handler
+      handler: 'products.handler',                    // The users.js is the entry point, so set it as handler
       timeout: Duration.seconds(2),                       // Maximum 2s timeout
       code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
+      layers: [lambdaLayer],
       environment: {
         S3_BUCKET_ARN: contentBucket.bucketArn,
         USER_TABLE: userTable.tableName,
+        CORS_ALLOW_ORIGIN: webisteOrigin
+      }
+    });
+
+
+    // IAM role for Lambda order
+    const orderEndpointsLambdaIAMRole = new iam.Role(this, 'orderEndpointsLambdaIAMRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+    });
+
+    // Add basic lambda role
+    orderEndpointsLambdaIAMRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"));
+    // grant dynamodb permission
+    orderTable.grantReadWriteData(orderEndpointsLambdaIAMRole);
+    productTable.grantReadData(orderEndpointsLambdaIAMRole);
+    // S3 bucket grant the permission
+    contentBucket.grantReadWrite(orderEndpointsLambdaIAMRole);
+
+    // Product Lambda endpoint
+    const orderEndpointsLambda = new lambda.Function(this, 'orderEndpointsLambda', {
+      runtime: lambda.Runtime.NODEJS_14_X,
+      role: orderEndpointsLambdaIAMRole,
+      architecture: lambda.Architecture.ARM_64,    // Use ARM_64 to save cost, but may need to tweak base on future lambda function content
+      handler: 'orders.handler',                    // The users.js is the entry point, so set it as handler
+      timeout: Duration.seconds(2),                       // Maximum 2s timeout
+      code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
+      layers: [lambdaLayer],
+      environment: {
+        PRODUCT_TABLE: productTable.tableName,
+        ORDER_TABLE: orderTable.tableName,
+        CORS_ALLOW_ORIGIN: webisteOrigin
+      }
+    });
+
+    // IAM role for Lambda product
+    const productEndpointsLambdaIAMRole = new iam.Role(this, 'productEndpointsLambdaIAMRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+    });
+
+    // Add basic lambda role
+    productEndpointsLambdaIAMRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"));
+    // grant dynamodb permission
+    productTable.grantReadWriteData(productEndpointsLambdaIAMRole);
+    // S3 bucket grant the permission
+    contentBucket.grantReadWrite(productEndpointsLambdaIAMRole);
+
+    // Product Lambda endpoint
+    const productEndpointsLambda = new lambda.Function(this, 'productEndpointsLambda', {
+      runtime: lambda.Runtime.NODEJS_14_X,
+      role: productEndpointsLambdaIAMRole,
+      architecture: lambda.Architecture.ARM_64,    // Use ARM_64 to save cost, but may need to tweak base on future lambda function content
+      handler: 'products.handler',                    // The users.js is the entry point, so set it as handler
+      timeout: Duration.seconds(2),                       // Maximum 2s timeout
+      code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
+      layers: [lambdaLayer],
+      environment: {
+        PRODUCT_TABLE: productTable.tableName,
         CORS_ALLOW_ORIGIN: webisteOrigin
       }
     });
@@ -168,9 +260,9 @@ export class ServerlessS3SiteStack extends Stack {
       cognitoUserPools: [websiteUserPool]
     });
 
-    const userAPI = new apigateway.RestApi(this, "users-api", {
-      restApiName: "User Service",
-      description: "This service serves users.",
+    const serviceAPI = new apigateway.RestApi(this, "service-api", {
+      restApiName: "Website Service",
+      description: "This service serves website API",
       // Set up CORS
       // Reference from https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors-console.html
       defaultCorsPreflightOptions: {
@@ -185,8 +277,9 @@ export class ServerlessS3SiteStack extends Stack {
       requestTemplates: { "application/json": '{ "statusCode": "200" }' }
     });
 
+
     // Add users resource for retriving all users
-    const usersResource = userAPI.root.addResource('users');
+    const usersResource = serviceAPI.root.addResource('users');
     usersResource.addMethod("GET", usersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
@@ -194,7 +287,7 @@ export class ServerlessS3SiteStack extends Stack {
     }); // GET /
 
     // Add user resource for specific user
-    const userResource = userAPI.root.addResource('user');
+    const userResource = serviceAPI.root.addResource('user');
     userResource.addMethod("GET", usersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
@@ -213,6 +306,78 @@ export class ServerlessS3SiteStack extends Stack {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     }); // PUT /
+
+    const productsIntegration = new apigateway.LambdaIntegration(productEndpointsLambda, {
+      requestTemplates: { "application/json": '{ "statusCode": "200" }' }
+    });
+
+    // Add products resource for retriving all products
+    const productsResource = serviceAPI.root.addResource('products');
+    productsResource.addMethod("GET", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // GET /
+
+    // Add users resource for retriving all users
+    const productResource = serviceAPI.root.addResource('product');
+    productResource.addMethod("GET", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // GET /
+
+    const productIDResource = userResource.addResource('{productId}');
+    // Integrate with product API
+    // Utilize the cognito pool authorizer
+    // https://docs.aws.amazon.com/cdk/api/v1/docs/aws-apigateway-readme.html#authorizers
+    productIDResource.addMethod("GET", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // GET /
+    productIDResource.addMethod("POST", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // POST /
+    productIDResource.addMethod("PUT", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // PUT /
+
+
+    const ordersIntegration = new apigateway.LambdaIntegration(orderEndpointsLambda, {
+      requestTemplates: { "application/json": '{ "statusCode": "200" }' }
+    });
+
+    // Add products resource for retriving all products belong to given user
+    const ordersResource = serviceAPI.root.addResource('orders');
+    ordersResource.addMethod("GET", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // GET /
+
+    // Add users resource for retriving all users
+    const orderResource = serviceAPI.root.addResource('order');
+    orderResource.addMethod("GET", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // GET /
+
+    const orderIDResource = userResource.addResource('{orderId}');
+    // Integrate with product API
+    // Utilize the cognito pool authorizer
+    // https://docs.aws.amazon.com/cdk/api/v1/docs/aws-apigateway-readme.html#authorizers
+    orderIDResource.addMethod("GET", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // GET /
+    orderIDResource.addMethod("POST", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // POST /
+    orderIDResource.addMethod("PUT", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    }); // PUT /
+
 
     // Print output
     new CfnOutput(this, 'WebsiteCognitoUserPoolId', { value: websiteUserPool.userPoolId });

@@ -9,10 +9,10 @@ https://docs.aws.amazon.com/sdk-for-javascript/v2/developer-guide/calling-servic
 https://docs.aws.amazon.com/lambda/latest/dg/nodejs-prog-model-handler.html 
 */
 const AWS = require('aws-sdk');
+const { uuid } = require('uuidv4');
 const STS = new AWS.STS();
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
 const s3 = new AWS.S3({ "signatureVersion": "v4" });
-const { uuid } = require('uuidv4');
 
 // Set to allow cors origin
 const headers = {
@@ -31,7 +31,7 @@ exports.handler = async function (event, context) {
     // Get user info from request context (it will be present as it passed the API Gateway's authorizer)
     var username = event.requestContext.authorizer.claims['cognito:username'].toLowerCase();
 
-    if (event.path == "/users") {
+    if (event.path == "/products") {
       if (event.httpMethod === "GET") {
 
         // Get the query parameter lastEvaluatedId (if exist)
@@ -44,13 +44,7 @@ exports.handler = async function (event, context) {
         // Limit to 10 records for now
         // If lastEvaluatedId is not present, will get the first pagination
         // Otherwise use the lastEvaluatedId field to try processing pagination
-        var response = await getUsers(maxQuerySize, lastEvaluatedId);
-
-        // Loop through all items to add asset download link
-        for (var index = 0; index < response.items.length; index++) {
-          // In get all query, will not send presignedurl for asset upload, only get, so third query is always false
-          response.items[index].asset = await getAssetObject(response.items[index].userId, response.items[index].asset, false);
-        }
+        var response = await getProducts(maxQuerySize, lastEvaluatedId);
 
         return {
           statusCode: 200,
@@ -61,28 +55,23 @@ exports.handler = async function (event, context) {
       }
     }
     // This clause will only deal with specific user modification
-    else if (event.path.indexOf("/user/" === 0)) {
-      var targetModifiedUserId = event.path.replace("/user/", "").toLowerCase();
+    else if (event.path.indexOf("/product/" === 0)) {
+      var targetProductId = event.path.replace("/product/", "").toLowerCase();
 
       if (event.httpMethod === "GET") {
-        // If target field is empty, current logic assume it means to use current user
-        if (targetModifiedUserId == "") {
-          targetModifiedUserId = username;
+        var record = await getProduct(targetProductId);
+
+        if (!record) {
+          return {
+            // not found, return 404
+            statusCode: 404,
+            // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
+            headers: headers,
+            body: JSON.stringify({"error": "product not found"})
+          };
         }
 
-        var record = await getUser(targetModifiedUserId);
-
-        // This record does not exist, but the token did exist, and is looking for this user
-        // This is likely first time user visist site
-        if (!record && targetModifiedUserId == username) {
-          // Create a record as this user does not exist before (this logic may be replaced in future through sign up logic)
-          record = createUpdateUser(username, "default", "user.png");
-        }
-
-        // Get Asset link
-        // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
-        // Inject a new asset field
-        record.asset = await getAssetObject(username, record.asset, username == targetModifiedUserId);
+        record['sampleasset'] = await getAssetObject(record.productId, record.sampleasset, record.createdBy == username);
 
         return {
           statusCode: 200,
@@ -92,46 +81,62 @@ exports.handler = async function (event, context) {
         };
 
       }
+      // Update existing product
       else if (event.httpMethod === "PUT") {
-        // Currently only user can modify its own profile
-        if (targetModifiedUserId != username) {
+        var targetModifiedproductId = event.path.replace("/product/", "").toLowerCase();
+
+        var record = await getProduct(targetModifiedproductId);
+
+        if (!record) {
+          return {
+            // not found, return 404
+            statusCode: 404,
+            // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
+            headers: headers,
+            body: JSON.stringify({"error": "product not found"})
+          };
+        }
+
+        // Currently only user can modify its own product
+        if (record.createdBy != username) {
           return {
             statusCode: 403,
             headers: headers,
-            body: "Unauthorized"
+            body: JSON.stringify({"error": "uauthorized"})
           };
         }
 
         var input = JSON.parse(event.body);
 
-        // check if empty or undefined, can add other check as needed
-        if (input.nickname === "") {
+        // Currently only user can modify its own product
+        if (!record.name || !record.desciption || record.price || !isNaN(record.price)) {
           return {
             statusCode: 400,
             headers: headers,
-            body: "Invalid format, nickname can only be alphanumeric"
+            body: JSON.stringify({"error": "invalid input"})
           };
         }
 
-        // Check if such record exist
-        var record = await getUser(username);
 
-        // If record is invalid, return 404 as user not found
-        if (!record) {
-          return {
-            statusCode: 404,
-            headers: headers,
-            body: "Invalid user"
-          };
-        }
+        // Update only description, price and name for now
+        // Should need to do more regex clean up if needed
+        record.name = input.name;
+        record.desciption  = input.desciption;
+        record.price  = input.price;
+
+        // Update timestampe and revision
+        record.lastModfiedTS = Date.now();
+        record.revision = uuid();
+        
+        // Note, depend on use case, may want to back up this revision before update (like to S3 or another dynamo table) for audit reason etc
 
         // If exist, modify the target field
-        record = await createUpdateUser(record.userId, input.nickname, record.asset);
+        record = await createUpdateProduct(record);
 
         // Get Asset link
         // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
         // Inject a new asset field
-        record.asset = await getAssetObject(record.userId, record.asset, record.userId == targetModifiedUserId);
+        record['sampleasset'] = await getAssetObject(record.productId, product.sampleasset, record.createdBy == username);
 
         return {
           statusCode: 200,
@@ -140,6 +145,38 @@ exports.handler = async function (event, context) {
           body: JSON.stringify(record)
         };
       }
+      // Create a new product
+      else if (event.httpMethod === "POST") {
+        var input = JSON.parse(event.body);
+
+        // Update only description and name for now
+        // Should need to do more regex clean up if needed
+        var newRecord = {
+          "productId" : uuid(),
+          "name": input.name,
+          "desciption": input.desciption,
+          "revision": uuid(),
+          "price": parseFloat(input.price),
+          "lastModfiedTS": Date.now(),
+          "createdTS": Date.now(),
+          "createdBy": username
+        };
+
+        // In this case, as productId is primary key of dynamoDB, so dynamoDB will error out if the key is already used
+        record = await createUpdateProduct(newRecord);
+
+        // Get Asset link
+        // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
+        // Inject a new asset field
+        record['sampleasset'] = await getAssetObject(record.productId, product.sampleasset, record.createdBy == username);
+
+        return {
+          statusCode: 200,
+          // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
+          headers: headers,
+          body: JSON.stringify(record)
+        };
+      };
     }
 
     // We only accept PUT and GET for now
@@ -163,10 +200,10 @@ exports.handler = async function (event, context) {
  * @param {*} username The input username to be searched 
  * @returns a user object if username found, if not found will return undefined
  */
-var getUsers = async function (pageSize, lastEvaluatedId) {
+var getProducts = async function (pageSize, lastEvaluatedId) {
   // Reference https://stackoverflow.com/questions/56074919/dynamo-db-pagination
   var params = {
-    TableName: process.env.USER_TABLE,
+    TableName: process.env.PRODUCT_TABLE,
     Limit: pageSize
   };
   if (lastEvaluatedId) {
@@ -188,46 +225,56 @@ var getUsers = async function (pageSize, lastEvaluatedId) {
 }
 
 /**
- * Get a record based on input username
- * @param {*} username The input username to be searched 
- * @returns a user object if username found, if not found will return undefined
+ * Get a record based on input productId
+ * @param {*} productId The input productId to be searched 
+ * @returns a product object if username found, if not found will return undefined
  */
-var getUser = async function (username) {
-  let userRecord = await dynamoDB
+var getProduct = async function (productId) {
+  let productRecord = await dynamoDB
     .get({
-      TableName: process.env.USER_TABLE,
+      TableName: process.env.PRODUCT_TABLE,
       Key: {
-        "userId": username
+        "productId": productId
       }
     })
     .promise();
 
-  return userRecord.Item;
+  return productRecord.Item;
 };
 
 /**
- * Modify or create a user record base on username
- * @param {*} username Target username to be modified
+ * Modify or create a productId record base on username
+ * @param {*} username Target productId to be modified
  * @param {*} nickname nickname field for target username to be modified
  * @param {*} asset asset field for target username to be modified
  * @returns record
  */
-var createUpdateUser = async function (username, nickname, asset) {
+var createUpdateProduct = async function (product) {
   // update dynamodb with default values
   var userRecord = await dynamoDB
     .update({
       TableName: process.env.USER_TABLE,
       Key: {
-        "userId": username
+        "productId": product.productId
       },
-      UpdateExpression: "set #nickname = :nickname, #asset = :asset",
+      UpdateExpression: "set #name = :name, #description = :description, #price = :price, #sampleasset = :sampleasset, #revision = :revision, #lastModfiedTS = :lastModfiedTS, #createdTS = :createdTS",
       ExpressionAttributeNames: {
-        "#nickname": "nickname",
-        "#asset": "asset"
+        "#name": "name",
+        "#description": "description",
+        "#price": "price",
+        "#sampleasset": "sampleasset",
+        "#revision": "revision",
+        "#lastModfiedTS": "lastModfiedTS",
+        "#createdTS": "createdTS"
       },
       ExpressionAttributeValues: {
-        ":nickname": nickname,
-        ":asset": asset
+        ":name": product.name,
+        ":description": product.description,
+        ":description": parseFloat(product.price),
+        ":sampleasset": '/sampleasset',
+        ":revision": product.revision,
+        ":lastModfiedTS": product.lastModfiedTS,
+        ":createdTS": product.createdTS
       },
       ReturnValues: "ALL_NEW"
     }).promise();
@@ -240,20 +287,20 @@ var createUpdateUser = async function (username, nickname, asset) {
 /**
  * Create an asset object assoicated with input target asset with getSignedUrl and preSignedPost base on input
  * {
-    prefix: '/' + username + '/' + asset,
+    prefix: '/' + productId + '/' + asset,
     getSignedUrl : null,
     preSignedPost: null
   };
- * @param {*} username Username for target asset to be retrieved/modified
+ * @param {*} productId productId for target asset to be retrieved/modified
  * @param {*} asset Target asset to be retrieved/modified
  * @param {*} preSignedPost Boolean with true to create PreSignedPost, false to set as null
  * @returns an asset object 
  * 
  */
-var getAssetObject = async function (username, asset, preSignedPost) {
+var getAssetObject = async function (productId, asset, preSignedPost) {
 
   var asset = {
-    prefix: '/users/' + username + '/' + asset
+    prefix: '/products/' + productId + '/' + asset
   };
 
   // set to a fix time, current is 10 min

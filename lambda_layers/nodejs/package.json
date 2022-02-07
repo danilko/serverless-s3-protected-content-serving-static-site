@@ -1,0 +1,10 @@
+{
+    "name": "serverless_s3_site",
+    "version": "0.1.0",
+    "bin": {
+        "serverless_s3_site": "bin/serverless_s3_site.js"
+    },
+    "dependencies": {
+        "uuidv4": "^6.2.12"
+    }
+}
