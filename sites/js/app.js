@@ -131,7 +131,7 @@ function populateUserContent() {
     html = html + "<div id=\"asset\"></div><br/>"
 
     // Only present the field
-    if (userAssetInfo.hasOwnProperty("preSignedPost")) {
+    if (userAssetInfo.asset.hasOwnProperty("preSignedPost")) {
         html = html + "<div><label for=\"file\">Choose file to upload: </label><input type=\"file\" id=\"assetFile\" accept=\".png\"><br/><input type=\"button\" onClick=\"uploadAsset()\" value=\"Upload File\"></div>"
     }
 
