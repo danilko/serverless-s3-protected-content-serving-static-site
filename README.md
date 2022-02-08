@@ -87,17 +87,6 @@ ServerlessS3SiteStack.usersapiEndpoint* = https://testapi.execute-api.us-west-2.
 
 ## Setup
 
-
-### Create an user
-The app does not include a sign in page yet, so need to manually create an user for testing
-
-Create a sample user, please replace `<WebSiteUserPoolId from CDK output>`, `<an alpha numeric username>` and `<valid user email>` placeholders with actual valuses
-```
-aws cognito-idp admin-create-user --user-pool-id <WebSiteUserPoolId from CDK output> --username '<an alpha numeric username>' --user-attributes Name=email,Value=<valid user email>
-```
-
-One will receive a temporary credential from above, note the credential for later use
-
 ### Set up the static site
 In `sites/js/app.js`
 
@@ -117,11 +106,9 @@ aws s3 sync . s3://<WebsiteBucketName from CDK output>/
 
 ## Test the setup
 
-Please go to  `WebsiteSignInUrl from CDK output` from above
-
-Then can use `update nickname` to update nickname
-
-or `Choose File` and then click `Upload File` to upload a new image for asset
+1. Please go to  `WebsiteSignInUrl from CDK output` from above
+2. Please use `Sign Up` link to sign up with valid email and password, then follow the direction to verify the email account.
+3. Then can use `update profile` to update nickname and profile or `Choose File` and then click `Upload Profile PIcture` to upload a new image
 
 ## Destroy/Clean Up
 Please note all S3 contents (both website and content buckets), DynamoDB table, cognito user pools will be destroyed by default along with the stack
