@@ -22,6 +22,8 @@ const headers = {
   "Access-Control-Allow-Credentials": true
 };
 
+const profilePicture = "profilePicture.png";
+
 // Limit the query size at one time to reduce load on system
 var maxQuerySize = 10;
 
@@ -35,23 +37,15 @@ exports.handler = async function (event, context) {
       if (event.httpMethod === "GET") {
         // Get the query parameter lastEvaluatedId (if exist)
         var paginationToken = null;
-        
-        if(event.queryStringParameters && event.queryStringParameters.paginationToken)
-        {
+
+        if (event.queryStringParameters && event.queryStringParameters.paginationToken) {
           paginationToken = event.queryStringParameters.paginationToken;
         }
 
         // Limit to 10 records for now
         // If lastEvaluatedId is not present, will get the first pagination
         // Otherwise use the lastEvaluatedId field to try processing pagination
-        var response = await getUsers(maxQuerySize, paginationToken);
-
-        // Loop through all items to add asset download link
-        for (var index = 0; index < response.users.length; index++) {
-
-          // In get all query, will not send presignedurl for asset upload, only get, so third query is always false
-          response.users[index].asset = await getAssetObject(response.users[index].userId, 'image.png', false);
-        }
+        var response = await getUsers(maxQuerySize, paginationToken, true);
 
         return {
           statusCode: 200,
@@ -66,13 +60,13 @@ exports.handler = async function (event, context) {
 
       const { userId } = event.pathParameters;
 
-      var user = await getUser(userId);
+      var user = await getUser(userId, false, false);
 
       if (!user) {
         return {
           statusCode: 404,
           headers: headers,
-          body: JSON.stringify(userId)
+          body: JSON.stringify({ "error": "user with given userId not found" })
         };
       }
 
@@ -80,7 +74,7 @@ exports.handler = async function (event, context) {
         // Get Asset link
         // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
         // Inject a new asset field
-        user.asset = await getAssetObject(user.userId, 'image.png', user.userId == tokenUserId);
+        user.profilePicture = await getAssetObject(user.id, profilePicture, user.id == tokenUserId);
 
         return {
           statusCode: 200,
@@ -90,7 +84,7 @@ exports.handler = async function (event, context) {
       }
       else if (event.httpMethod === "PUT") {
         // Only user can modify its own profile
-        if (user.userId != tokenUserId) {
+        if (user.id != tokenUserId) {
           return {
             statusCode: 403,
             headers: headers,
@@ -115,12 +109,10 @@ exports.handler = async function (event, context) {
 
         await updateUser(user);
 
-        user = await getUser(userId);
-
-        // Get Asset link
-        // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
-        // Inject a new asset field
-        user.asset = await getAssetObject(user.userId, 'image.png', user.userId == tokenUserId);
+        // Get latest user again after modification
+        // Generate S3 link for asset
+        // The third paratmer determine whatever to generate upload link based on if the requester is the owner of the record
+        user = await getUser(user.id, true, user.id == tokenUserId);
 
         return {
           statusCode: 200,
@@ -150,9 +142,10 @@ exports.handler = async function (event, context) {
 /**
  * Get all users
  * @param {*} username The input username to be searched 
+ * @param {*} generateAsset Boolean to determine if should generate link for S3 asset
  * @returns a user object if username found, if not found will return undefined
  */
-var getUsers = async function (pageSize, paginationToken) {
+var getUsers = async function (pageSize, paginationToken, generateAsset) {
   // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CognitoIdentityServiceProvider.html#listUsers-property
   var params = {
     UserPoolId: process.env.COGNITO_POOL_ID,
@@ -165,13 +158,9 @@ var getUsers = async function (pageSize, paginationToken) {
 
   var response = await cognitoidentityserviceprovider.listUsers(params).promise();
   var responseUsers = [];
-  var paginationToken = null;
-  
-      console.log(JSON.stringify(response));
+  var responsePaginationToken = null;
+
   if (response && response.Users) {
-
-
-
     // Message to not return too much info for each user
     for (var index = 0; index < response.Users.length; index++) {
 
@@ -187,28 +176,36 @@ var getUsers = async function (pageSize, paginationToken) {
         }
       });
 
-      responseUsers.push({
-        userId: response.Users[index].Username,
+      var generatedUser = {
+        id: response.Users[index].Username,
         userCreateDate: response.Users[index].UserCreateDate,
         nickname: nickname,
         profile: profile,
-      })
+      };
 
-      paginationToken = response.PaginationToken;
+      if (generateAsset) {
+        // Get Asset link for profilePicture
+        // The third field is always false as get all users will only provide view link, not upload
+        generatedUser.profilePicture = await getAssetObject(generatedUser.id, profilePicture, false);
+      }
+
+      responseUsers.push(generatedUser);
+
+      responsePaginationToken = response.PaginationToken ? response.PaginationToken : null;
     }
   }
-  
-      return {
-      users: responseUsers,
-      paginationToken: paginationToken
-    };
+
+  return {
+    users: responseUsers,
+    paginationToken: responsePaginationToken
+  };
 }
 
 /**
- * Get a record based on input userId
+ * Get a record based on input user's id field
  * @param {*} user The target user to be updated 
  */
- var updateUser = async function (user) {
+var updateUser = async function (user) {
   var params = {
     UserAttributes: [
       {
@@ -220,21 +217,23 @@ var getUsers = async function (pageSize, paginationToken) {
       /* more items */
     ],
     UserPoolId: process.env.COGNITO_POOL_ID,
-    Username: user.userId, 
+    Username: user.id,
   };
   await cognitoidentityserviceprovider.adminUpdateUserAttributes(params).promise();
 };
 
 /**
- * Get a record based on input userId
- * @param {*} userId The input userId to be searched 
+ * Get a record based on input id
+ * @param {*} id The input user's id to be searched 
+ * @param {*} generateAsset Boolean to determine if should generate link for S3 asset
+ * @param {*} generateAssetUpload Boolean to determine if should generate upload link for S3 asset
  * @returns a user object if username found, if not found will return undefined
  */
-var getUser = async function (userId) {
+var getUser = async function (id, generateAsset, generateAssetUpload) {
   // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CognitoIdentityServiceProvider.html#getUser-property
   var params = {
     UserPoolId: process.env.COGNITO_POOL_ID,
-    Username: userId
+    Username: id
   };
 
   var user = await cognitoidentityserviceprovider.adminGetUser(params).promise();
@@ -253,12 +252,20 @@ var getUser = async function (userId) {
       }
     });
 
-    return {
-      userId: user.Username,
+    var generatedUser = {
+      id: user.Username,
       nickname: nickname,
       profile: profile,
       userCreateDate: user.UserCreateDate
+    };
+
+    if (generateAsset) {
+      // Get Asset link for profilePicture
+      // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
+      generatedUser.profilePicture = await getAssetObject(generatedUser.id, profilePicture, generateAssetUpload);
     }
+
+    return generatedUser;
   }
 
   return null;
@@ -267,20 +274,20 @@ var getUser = async function (userId) {
 /**
  * Create an asset object assoicated with input target asset with getSignedUrl and preSignedPost base on input
  * {
-    prefix: '/' + username + '/' + asset,
+    prefix: '/' + id + '/' + asset,
     getSignedUrl : null,
     preSignedPost: null
   };
- * @param {*} username Username for target asset to be retrieved/modified
- * @param {*} asset Target asset to be retrieved/modified
+ * @param {*} id user's id for target asset to be retrieved/modified
+ * @param {*} assetSuffix Target assetSuffix to be retrieved/modified
  * @param {*} preSignedPost Boolean with true to create PreSignedPost, false to set as null
  * @returns an asset object 
  * 
  */
-var getAssetObject = async function (username, asset, preSignedPost) {
+var getAssetObject = async function (id, assetSuffix, preSignedPost) {
 
   var asset = {
-    prefix: '/users/' + username + '/' + asset
+    prefix: '/users/' + id + '/' + assetSuffix
   };
 
   // set to a fix time, current is 10 min
@@ -305,8 +312,8 @@ var getAssetObject = async function (username, asset, preSignedPost) {
       },
       Expires: 600,
       Conditions: [
-        // content length restrictions: 0-1MB]
-        ['content-length-range', 0, 1000000]]
+        // content length restrictions: 0-5KB]
+        ['content-length-range', 0, 500000]]
     };
 
     await s3.createPresignedPost(params, function (err, data) {
