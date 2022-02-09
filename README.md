@@ -88,12 +88,14 @@ ServerlessS3SiteStack.usersapiEndpoint* = https://testapi.execute-api.us-west-2.
 ## Setup
 
 ### Set up the static site
-In `sites/js/app.js`
+In `sites/site_config.json`
 
 Replace following `<WebsiteSignInUrl from CDK output>` and `<usersapiEndpoint* from CDK output>` with actual values and save the change
 ```
-var signInUrl = '<WebsiteSignInUrl from CDK output>';
-var apiEndpointUrl = '<usersapiEndpoint* from CDK output>';
+{
+ "signInUrl" : "<WebsiteSignInUrl from CDK output>";
+ "apiEndpointUrl" : "<usersapiEndpoint* from CDK output>";
+}
 ```
 
 ### Copy the website static content to bucket

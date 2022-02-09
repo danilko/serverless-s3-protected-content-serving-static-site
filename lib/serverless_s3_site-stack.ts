@@ -39,6 +39,21 @@ export class ServerlessS3SiteStack extends Stack {
     });
 
     // const product table
+    const userpRrofileTable = new dynamodb.Table(this, 'userProfileTable', {
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      billingMode: dynamodb.BillingMode.PROVISIONED,
+      removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
+    });
+
+    // Add per minute capacity (per second) 
+    // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html
+    userpRrofileTable.autoScaleWriteCapacity({
+      minCapacity: 1,
+      maxCapacity: 10,
+    }).scaleOnUtilization({ targetUtilizationPercent: 75 });
+
+    // const product table
     const productTable = new dynamodb.Table(this, 'productTable', {
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
@@ -89,7 +104,7 @@ export class ServerlessS3SiteStack extends Stack {
     });
 
     const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName;
-    // const webisteOrigin = 'http://localhost:8080';
+    //const webisteOrigin = 'http://localhost:8080';
 
     // Add CORS to allow the cloudfront website to access the content bucket
     // Currently enable GET/POST/PUT/DELETE to retrieve and update content
@@ -102,29 +117,13 @@ export class ServerlessS3SiteStack extends Stack {
 
     // AWS Cognito for securing website endpoint
     const websiteUserPool = new cognito.UserPool(this, 'website-userpool', {
-      userPoolName: 'website-cognito-userpool',
+      userPoolName: 'website-userpool',
       selfSignUpEnabled: true,
       standardAttributes: {
         email: {
           required: true,
           mutable: true
-        },
-        nickname: {
-          required: true,
-          mutable: true,
-        },
-        givenName: {
-          required: true,
-          mutable: true,
-        },
-        familyName: {
-          required: true,
-          mutable: true,
-        },
-      },
-      customAttributes: {
-        accountStatus: new cognito.StringAttribute({ mutable: true }),
-        accountType: new cognito.StringAttribute({ mutable: true })
+        }
       },
       removalPolicy: RemovalPolicy.DESTROY,  // When the stack is destroyed, the pool and its info are also destroyed
       userVerification: {
@@ -188,12 +187,14 @@ export class ServerlessS3SiteStack extends Stack {
     const cognitoPolicy = new iam.Policy(this, 'cognito-modification', {
       statements: [
         new iam.PolicyStatement({
-          actions: ['cognito-idp:AdminUpdateUserAttributes', 'cognito-idp:ListUsers', 'cognito-idp:AdminGetUser' ],
+          actions: ['cognito-idp:AdminUpdateUserAttributes', 'cognito-idp:ListUsers', 'cognito-idp:AdminGetUser'],
           resources: [websiteUserPool.userPoolArn]
         })
       ]
     });
     userEndpointsLambdaIAMRole.attachInlinePolicy(cognitoPolicy);
+    // DynamoDB table for user write
+    userpRrofileTable.grantReadWriteData(userEndpointsLambdaIAMRole);
 
     // S3 bucket grant the permission
     contentBucket.grantReadWrite(userEndpointsLambdaIAMRole);
@@ -210,6 +211,7 @@ export class ServerlessS3SiteStack extends Stack {
       code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
       layers: [lambdaLayer],
       environment: {
+        USER_PROFILE_TABLE: userpRrofileTable.tableName,
         S3_BUCKET_ARN: contentBucket.bucketArn,
         COGNITO_POOL_ID: websiteUserPool.userPoolId,
         CORS_ALLOW_ORIGIN: webisteOrigin

@@ -25,7 +25,7 @@ const headers = {
 const profilePicture = "profilePicture.png";
 
 // Limit the query size at one time to reduce load on system
-var maxQuerySize = 10;
+var maxQuerySize = 5;
 
 // Reference from https://docs.aws.amazon.com/cdk/v2/guide/resources.html
 exports.handler = async function (event, context) {
@@ -36,16 +36,16 @@ exports.handler = async function (event, context) {
     if (event.resource == "/users") {
       if (event.httpMethod === "GET") {
         // Get the query parameter lastEvaluatedId (if exist)
-        var paginationToken = null;
+        var lastEvaluatedId = null;
 
-        if (event.queryStringParameters && event.queryStringParameters.paginationToken) {
-          paginationToken = event.queryStringParameters.paginationToken;
+        if (event.queryStringParameters && event.queryStringParameters.lastEvaluatedId) {
+          lastEvaluatedId = event.queryStringParameters.lastEvaluatedId;
         }
 
         // Limit to 10 records for now
         // If lastEvaluatedId is not present, will get the first pagination
         // Otherwise use the lastEvaluatedId field to try processing pagination
-        var response = await getUsers(maxQuerySize, paginationToken, true);
+        var response = await getUsers(maxQuerySize, lastEvaluatedId, true);
 
         return {
           statusCode: 200,
@@ -60,14 +60,31 @@ exports.handler = async function (event, context) {
 
       const { userId } = event.pathParameters;
 
+      // No generation of asset link for fast retriving
       var user = await getUser(userId, false, false);
 
       if (!user) {
-        return {
-          statusCode: 404,
-          headers: headers,
-          body: JSON.stringify({ "error": "user with given userId not found" })
-        };
+        // If token from cognito == target user, then this is likely first time this user login
+        // Set it up with default data
+        if (tokenUserId == userId) {
+          // Attempt to init user profile
+          var newUser = {
+            id: userId,
+            "nickname": "default nickname",
+            "profile": "default profile",
+          }
+          // No generation of asset link to speed up creation as it will be updated based on below logic
+          user = await createUpdateUser(newUser, false, false);
+        }
+        else
+        {
+          return {
+            statusCode: 404,
+            headers: headers,
+            body: JSON.stringify({ "error": "user with given userId not found" })
+          };
+        }
+
       }
 
       if (event.httpMethod === "GET") {
@@ -107,12 +124,11 @@ exports.handler = async function (event, context) {
         user.nickname = input.nickname;
         user.profile = input.profile;
 
-        await updateUser(user);
-
-        // Get latest user again after modification
+        // Get latest user after modification
         // Generate S3 link for asset
         // The third paratmer determine whatever to generate upload link based on if the requester is the owner of the record
-        user = await getUser(user.id, true, user.id == tokenUserId);
+       user =  await createUpdateUser(user, true, user.id == tokenUserId);
+
 
         return {
           statusCode: 200,
@@ -140,12 +156,54 @@ exports.handler = async function (event, context) {
 
 
 /**
+ * Get all users based on input userId
+ * @param {*} pageSize The maximum pageSize to return
+ * @param {*} lastEvaluatedId The lastEvaluatedId to be used to continue to next page search
+ * @param {*} userId The input userId to be searched 
+ * @returns all orders for given userId
+ */
+var getUsers = async function (pageSize, lastEvaluatedId, generateAsset) {
+  // Reference https://stackoverflow.com/questions/56074919/dynamo-db-pagination
+  var params = {
+    TableName: process.env.USER_PROFILE_TABLE,
+    Limit: pageSize,
+  };
+  if (lastEvaluatedId) {
+    params.ExclusiveStartKey = { item_id: lastEvaluatedId };
+  }
+
+  try {
+    var response = await dynamoDB
+      .scan(params)
+      .promise();
+
+    if (generateAsset) {
+      // Loop through all items to add asset download link
+      for (var index = 0; index < response.Items.length; index++) {
+        // Get Asset link for profilePicture (profilePicture in this case is not stored in DB as it is static file name)
+        // In get all query, will not send presignedurl for asset upload, only get, so third query is always false
+        response.Items[index].profilePicture = await getAssetObject(response.Items[index].id, profilePicture, false);
+      }
+    }
+
+    return {
+      users: response.Items,
+      lastEvaluatedId: response.LastEvaluatedKey
+    };
+
+  } catch (error) {
+    throw error;
+  }
+}
+
+
+/**
  * Get all users
  * @param {*} username The input username to be searched 
  * @param {*} generateAsset Boolean to determine if should generate link for S3 asset
  * @returns a user object if username found, if not found will return undefined
  */
-var getUsers = async function (pageSize, paginationToken, generateAsset) {
+var getUsersCognito = async function (pageSize, paginationToken, generateAsset) {
   // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CognitoIdentityServiceProvider.html#listUsers-property
   var params = {
     UserPoolId: process.env.COGNITO_POOL_ID,
@@ -205,16 +263,17 @@ var getUsers = async function (pageSize, paginationToken, generateAsset) {
  * Get a record based on input user's id field
  * @param {*} user The target user to be updated 
  */
-var updateUser = async function (user) {
+var updateUserCognito = async function (user) {
   var params = {
     UserAttributes: [
       {
         Name: 'nickname',
         Value: user.nickname,
+      },
+      {
         Name: 'profile',
         Value: user.profile
-      },
-      /* more items */
+      }
     ],
     UserPoolId: process.env.COGNITO_POOL_ID,
     Username: user.id,
@@ -229,7 +288,33 @@ var updateUser = async function (user) {
  * @param {*} generateAssetUpload Boolean to determine if should generate upload link for S3 asset
  * @returns a user object if username found, if not found will return undefined
  */
-var getUser = async function (id, generateAsset, generateAssetUpload) {
+var getUser = async function (userId, generateAsset, generateAssetUpload) {
+  var userRecord = await dynamoDB
+    .get({
+      TableName: process.env.USER_PROFILE_TABLE,
+      Key: {
+        "id": userId
+      }
+    })
+    .promise();
+
+  if (userRecord.Item && generateAsset) {
+    // Get Asset link for profilePicture (profilePicture in this case is not stored in DB as it is static file name)
+    // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
+    userRecord.Item.profilePicture = await getAssetObject(userRecord.Item.id, profilePicture, generateAssetUpload);
+  }
+
+  return userRecord.Item;
+};
+
+/**
+ * Get a record based on input id
+ * @param {*} id The input user's id to be searched 
+ * @param {*} generateAsset Boolean to determine if should generate link for S3 asset
+ * @param {*} generateAssetUpload Boolean to determine if should generate upload link for S3 asset
+ * @returns a user object if username found, if not found will return undefined
+ */
+var getUserCognito = async function (id, generateAsset, generateAssetUpload) {
   // https://docs.aws.amazon.com/AWSJavaScriptSDK/latest/AWS/CognitoIdentityServiceProvider.html#getUser-property
   var params = {
     UserPoolId: process.env.COGNITO_POOL_ID,
@@ -260,7 +345,7 @@ var getUser = async function (id, generateAsset, generateAssetUpload) {
     };
 
     if (generateAsset) {
-      // Get Asset link for profilePicture
+      // Get Asset link for profilePicture (profilePicture in this case is not stored in DB as it is static file name)
       // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
       generatedUser.profilePicture = await getAssetObject(generatedUser.id, profilePicture, generateAssetUpload);
     }
@@ -270,6 +355,46 @@ var getUser = async function (id, generateAsset, generateAssetUpload) {
 
   return null;
 };
+
+/**
+ * Modify or create a user record base on username
+ * @param {*} username Target username to be modified
+ * @param {*} nickname nickname field for target username to be modified
+ * @param {*} generateAsset whatever to generate the download link
+ * @returns record
+ */
+var createUpdateUser = async function (user, generateAsset, generateAssetUpload) {
+  // update dynamodb with default values
+  var userRecord = await dynamoDB
+    .update({
+      TableName: process.env.USER_PROFILE_TABLE,
+      Key: {
+        "id": user.id
+      },
+      UpdateExpression: "set #nickname = :nickname, #profile = :profile",
+      ExpressionAttributeNames: {
+        "#nickname": "nickname",
+        "#profile": "profile"
+      },
+      ExpressionAttributeValues: {
+        ":nickname": user.nickname,
+        ":profile": user.profile
+      },
+      ReturnValues: "ALL_NEW"
+    }).promise();
+
+  // Item return in here will be Attributes, not field
+  // {"Attributes": {//fields}}
+
+  if (generateAsset) {
+    // Get Asset link for profilePicture (profilePicture in this case is not stored in DB as it is static file name)
+    // Only generate post link if it is the target modified user is token's user (i.e. user tries to modify itself)
+    userRecord.Attributes.profilePicture = await getAssetObject(user.id, profilePicture, generateAssetUpload);
+  }
+
+  return userRecord.Attributes;
+};
+
 
 /**
  * Create an asset object assoicated with input target asset with getSignedUrl and preSignedPost base on input

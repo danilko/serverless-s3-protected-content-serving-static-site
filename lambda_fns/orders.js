@@ -221,7 +221,7 @@ var getOrders = async function (pageSize, userId, lastEvaluatedId) {
       .promise();
 
     return {
-      items: response.Items,
+      orders: response.Items,
       lastEvaluatedId: response.LastEvaluatedKey
     };
   } catch (error) {

@@ -2,14 +2,57 @@
 // This is an very raw sample to test the login
 // This will need clean up + improvement to be ready for production usage
 
-var signInUrl = 'https://website-app.auth.us-west-2.amazoncognito.com/login?client_id=2h8jeqqvpmqicmahp73o3lgkif&response_type=token&redirect_uri=http://localhost:8080';
-var apiEndpointUrl = 'https://t1gh4qdmp3.execute-api.us-west-2.amazonaws.com/prod/';
+var signInUrl = '';
+var apiEndpointUrl = '';
 
-var oauth2Endpoint = 'https://' + (new URL(signInUrl)).hostname + '/';
+var oauth2Endpoint = '';
 
 var global = this;
 var userToken = null;
 var userInfo = null;
+
+var initApp = async function()
+{
+    var config = await new Promise((resolve, reject) => {
+        // Get user info
+        fetch('/site_config.json', {
+            method: 'GET'
+        })
+            .then(response => response.json())
+            .then(data => {
+                resolve(data);
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+                reject(error);
+            });
+    });
+
+    if(!config.signInUrl || config.signInUrl.trim().length == 0 || !config.apiEndpointUrl || config.apiEndpointUrl.trim().length == 0 )
+    {
+        setNotification("site_config.json is not setup correctly");
+        return;
+    }
+
+    // Setup the site
+    global.signInUrl = config.signInUrl.trim();
+    global.apiEndpointUrl = config.apiEndpointUrl.trim();
+    global.oauth2Endpoint = 'https://' + (new URL(signInUrl)).hostname + '/';
+
+    router();
+}
+
+var clearNotification = async function ()
+{
+    document.getElementById('message').innerHTML = "";
+}
+
+var setNotification = async function (message)
+{
+    var html = message;
+    var html = html + "<br/><input type=\"button\" value=\"Clear Message\" onClick=\"clearNotification()\"\>";
+    document.getElementById('message').innerHTML = html;
+}
 
 var router = async function () {
     const url = new URL(window.location.href)
@@ -24,7 +67,7 @@ var router = async function () {
 }
 
 var validateToken = async function () {
-    if (global.userToken != null && global.userToken.expiration != null && global.userToken.expiration > Math.round(Date.now() / 1000)) {
+    if (global.userToken != null && global.userToken.expires_in != null && global.userToken.expires_in > Date.now()) {
         return true;
     }
     else {
@@ -39,13 +82,13 @@ var extractUserToken = async function (hash) {
     // Get the current time in second
     // https://stackoverflow.com/questions/3830244/get-current-date-time-in-seconds
     // Then minus about 5 minute (300s) to get a buffer
-    var expiration = Math.round(Date.now() / 1000) + searchParams.get('expires_in') - 300;
+    var expires_in = Date.now() + (searchParams.get('expires_in') * 1000) - (300 * 1000);
 
     global.userToken = {
         id_token: searchParams.get('id_token'),
         access_token: searchParams.get('access_token'),
         token_type: searchParams.get('token_type'),
-        expiration: expiration
+        expires_in: expires_in
     }
 
     var user = await new Promise((resolve, reject) => {
@@ -96,10 +139,10 @@ var getUser = async function (userId) {
 
 }
 
-var getAllUserAPI = async function (paginationToken) {
+var getAllUserAPI = async function (lastEvaluatedId) {
     var data = await new Promise((resolve, reject) => {
-        // Introduce query for paginationToken for pagination if one exist
-        var query = paginationToken ? '?paginationToken=' + paginationToken : '';
+        // Introduce query for lastEvaluatedId for pagination if one exist
+        var query = lastEvaluatedId ? '?lastEvaluatedId=' + lastEvaluatedId : '';
         // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
         fetch(apiEndpointUrl + 'users' + query, {
             method: 'GET',
@@ -119,9 +162,9 @@ var getAllUserAPI = async function (paginationToken) {
             });
     });
 
-    // Do not clear content if paginationToken is valid (as this is continous search)
-    // Clear content if paginationToken is invalid (indicate first search)
-    populateUserContents(data, paginationToken ? false : true);
+    // Do not clear content if lastEvaluatedId is valid (as this is continous search)
+    // Clear content if lastEvaluatedId is invalid (indicate first search)
+    populateUserContents(data, lastEvaluatedId ? false : true);
 }
 
 var checkImage = async function (imageUrl) {
@@ -176,7 +219,7 @@ var populateUserContent = async function () {
 
     if (imageExist) {
         // Image exist and is loaded
-        document.getElementById('profilePicture').innerHTML = "<div><img src=\"" + global.userInfo.profilePicture.getSignedUrl + "\"><a href = \"" + global.userInfo.profilePicture.getSignedUrl + "\">DOWNLOAD LINK</a></div>"
+        document.getElementById('profilePicture').innerHTML = "<div><img style=\"width:128px;height:128px;\" src=\"" + global.userInfo.profilePicture.getSignedUrl + "\"><a href = \"" + global.userInfo.profilePicture.getSignedUrl + "\">DOWNLOAD LINK</a></div>"
     }
     else {
         // Image DID NOT LOAD
@@ -197,14 +240,14 @@ var populateUserContents = async function (data, clearContent) {
 
         // Update nickname field as input filed
         html = html + "<div>Nickname:" + userInfo.nickname + "</div><br/>";
-
+        html = html + "<div>Profile:" + userInfo.profile + "</div><br/>";
 
         // Check if image exist
         var imageExist = await checkImage(userInfo.profilePicture.getSignedUrl);
 
         if (imageExist) {
             // Image exist and is loaded
-            html = html + "<div id=\"profilePicture\"><img src=\"" + userInfo.profilePicture.getSignedUrl + "\"></div><br/>";
+            html = html + "<div id=\"profilePicture\"><img style=\"width:128px;height:128px;\" src=\"" + userInfo.profilePicture.getSignedUrl + "\"></div><br/>";
         }
         else {
             // Image DID NOT LOAD
@@ -217,9 +260,9 @@ var populateUserContents = async function (data, clearContent) {
     // finish the div tag
     html = html + "</div>";
 
-    if (data.paginationToken) {
-        // Add a next button with last paginationToken
-        html = html + "<div><input type=\"button\" value =\"Next\" onClick=\"getAllUserAPI(" + data.paginationToken + ")\"></div><br/>"
+    if (data.lastEvaluatedId) {
+        // Add a next button with last lastEvaluatedId
+        html = html + "<div><input type=\"button\" value =\"Next\" onClick=\"getAllUserAPI(" + data.lastEvaluatedId + ")\"></div><br/>"
     }
 
     // Clear previous results 
@@ -243,7 +286,7 @@ var updateUserInfo = async function () {
 
     // Update content
     // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-    fetch(apiEndpointUrl + 'user/' + global.userInfo.userId, {
+    fetch(apiEndpointUrl + 'user/' + global.userInfo.id, {
         method: 'PUT',
         credentials: 'include',
         headers: {
