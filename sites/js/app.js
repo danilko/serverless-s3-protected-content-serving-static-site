@@ -11,8 +11,7 @@ var global = this;
 var userToken = null;
 var userInfo = null;
 
-var initApp = async function()
-{
+var initApp = async function () {
     var config = await new Promise((resolve, reject) => {
         // Get user info
         fetch('/site_config.json', {
@@ -28,8 +27,7 @@ var initApp = async function()
             });
     });
 
-    if(!config.signInUrl || config.signInUrl.trim().length == 0 || !config.apiEndpointUrl || config.apiEndpointUrl.trim().length == 0 )
-    {
+    if (!config.signInUrl || config.signInUrl.trim().length == 0 || !config.apiEndpointUrl || config.apiEndpointUrl.trim().length == 0) {
         setNotification("site_config.json is not setup correctly");
         return;
     }
@@ -42,13 +40,11 @@ var initApp = async function()
     router();
 }
 
-var clearNotification = async function ()
-{
+var clearNotification = async function () {
     document.getElementById('message').innerHTML = "";
 }
 
-var setNotification = async function (message)
-{
+var setNotification = async function (message) {
     var html = message;
     var html = html + "<br/><input type=\"button\" value=\"Clear Message\" onClick=\"clearNotification()\"\>";
     document.getElementById('message').innerHTML = html;
@@ -204,10 +200,8 @@ var populateUserContent = async function () {
     html = html + "<input type=\"button\" onClick=\"updateUserInfo()\" value=\"Update User Info\">";
     html = html + "<div id=\"profilePicture\"></div><br/>"
 
-    // Only present the field
-    if (global.userInfo.profilePicture.hasOwnProperty("preSignedPost")) {
-        html = html + "<div><label for=\"file\">Choose file to upload: </label><input type=\"file\" id=\"profilePictureFile\" accept=\".png\"><br/><input type=\"button\" onClick=\"uploadProfilePicture()\" value=\"Upload Profile Picture\"></div>"
-    }
+    // Only present the field if this is to modify target user
+    html = html + "<div><label for=\"file\">Choose file to upload: </label><input type=\"file\" id=\"profilePictureFile\" accept=\".png\"><br/><input type=\"button\" onClick=\"uploadProfilePicture()\" value=\"Upload Profile Picture\"></div>"
 
     // finish the div tag
     html = html + "</div>"
@@ -215,11 +209,11 @@ var populateUserContent = async function () {
     document.getElementById('user').innerHTML = html;
 
     // Check if image exist
-    var imageExist = await checkImage(global.userInfo.profilePicture.getSignedUrl);
+    var imageExist = await checkImage(global.userInfo.profilePicture);
 
     if (imageExist) {
         // Image exist and is loaded
-        document.getElementById('profilePicture').innerHTML = "<div><img style=\"width:128px;height:128px;\" src=\"" + global.userInfo.profilePicture.getSignedUrl + "\"><a href = \"" + global.userInfo.profilePicture.getSignedUrl + "\">DOWNLOAD LINK</a></div>"
+        document.getElementById('profilePicture').innerHTML = "<div><img style=\"width:128px;height:128px;\" src=\"" + global.userInfo.profilePicture + "\"></div>"
     }
     else {
         // Image DID NOT LOAD
@@ -243,7 +237,7 @@ var populateUserContents = async function (data, clearContent) {
         html = html + "<div>Profile:" + userInfo.profile + "</div><br/>";
 
         // Check if image exist
-        var imageExist = await checkImage(userInfo.profilePicture.getSignedUrl);
+        var imageExist = await checkImage(userInfo.profilePicture);
 
         if (imageExist) {
             // Image exist and is loaded
@@ -307,17 +301,38 @@ var updateUserInfo = async function () {
 
 var uploadProfilePicture = async function () {
 
+    // fetch the presigned post, which is a temporary form data object for uploading to S3 for target asset
+    var response = await new Promise((resolve, reject) => {
+        fetch(apiEndpointUrl + 'user/' + global.userInfo.id + '/profileAsset/profilePicture.png/presignedPost', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+            }
+        })
+            .then(response => response.json())
+            .then(data => {
+                resolve(data);
+            })
+            .catch((error) => {
+                setNotification('FAIL TO UPLOAD PROFILE PICTURE WITH ERROR ' + error);
+
+                reject(error);
+            });
+    });
+
     // Reference from https://bobbyhadz.com/blog/notes-s3-signed-url
     const formData = new FormData();
 
-    Object.entries(global.userInfo.profilePicture.preSignedPost.fields).forEach(([k, v]) => {
+    Object.entries(response.fields).forEach(([k, v]) => {
         formData.append(k, v);
     });
 
     formData.append('file', document.getElementById('profilePictureFile').files[0]);
 
     // post data
-    fetch(global.userInfo.profilePicture.preSignedPost.url, {
+    fetch(response.url, {
         method: 'POST',
         body: formData
     })
@@ -326,6 +341,8 @@ var uploadProfilePicture = async function () {
             populateUserContent();
         })
         .catch((error) => {
+            setNotification('FAIL TO UPLOAD PROFILE PICTURE WITH ERROR ' + error);
+
             console.error('Error:', error);
         });
 }

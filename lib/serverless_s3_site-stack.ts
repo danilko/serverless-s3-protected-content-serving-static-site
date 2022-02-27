@@ -1,5 +1,4 @@
 import { Duration, RemovalPolicy, Stack, StackProps, CfnOutput } from 'aws-cdk-lib';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as cloudfrontOrigins from 'aws-cdk-lib/aws-cloudfront-origins';
@@ -39,8 +38,9 @@ export class ServerlessS3SiteStack extends Stack {
     });
 
     // const product table
-    const userpRrofileTable = new dynamodb.Table(this, 'userProfileTable', {
-      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+    const websiteTable = new dynamodb.Table(this, 'websiteTable', {
+      partitionKey: { name: 'PK', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'SK', type: dynamodb.AttributeType.STRING },
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       billingMode: dynamodb.BillingMode.PROVISIONED,
       removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
@@ -48,40 +48,16 @@ export class ServerlessS3SiteStack extends Stack {
 
     // Add per minute capacity (per second) 
     // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html
-    userpRrofileTable.autoScaleWriteCapacity({
+    websiteTable.autoScaleWriteCapacity({
       minCapacity: 1,
       maxCapacity: 10,
     }).scaleOnUtilization({ targetUtilizationPercent: 75 });
 
-    // const product table
-    const productTable = new dynamodb.Table(this, 'productTable', {
-      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      billingMode: dynamodb.BillingMode.PROVISIONED,
-      removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
-    });
-
-    // Add per minute capacity (per second) 
-    // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html
-    productTable.autoScaleWriteCapacity({
+    websiteTable.autoScaleReadCapacity({
       minCapacity: 1,
       maxCapacity: 10,
     }).scaleOnUtilization({ targetUtilizationPercent: 75 });
 
-    // const product table
-    const orderTable = new dynamodb.Table(this, 'orderTable', {
-      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      billingMode: dynamodb.BillingMode.PROVISIONED,
-      removalPolicy: RemovalPolicy.DESTROY   // When the stack is destroyed, the table is also destroyed
-    });
-
-    // Add per minute capacity (per second) 
-    // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadWriteCapacityMode.html
-    orderTable.autoScaleWriteCapacity({
-      minCapacity: 1,
-      maxCapacity: 10,
-    }).scaleOnUtilization({ targetUtilizationPercent: 75 });
 
     // Crate origin access identity (need for kms encrpyted bucket)
     // https://stackoverflow.com/questions/60905976/cloudfront-give-access-denied-response-created-through-aws-cdk-python-for-s3-buc
@@ -192,9 +168,10 @@ export class ServerlessS3SiteStack extends Stack {
         })
       ]
     });
+
     userEndpointsLambdaIAMRole.attachInlinePolicy(cognitoPolicy);
     // DynamoDB table for user write
-    userpRrofileTable.grantReadWriteData(userEndpointsLambdaIAMRole);
+    websiteTable.grantReadWriteData(userEndpointsLambdaIAMRole);
 
     // S3 bucket grant the permission
     contentBucket.grantReadWrite(userEndpointsLambdaIAMRole);
@@ -206,18 +183,45 @@ export class ServerlessS3SiteStack extends Stack {
       runtime: lambda.Runtime.NODEJS_14_X,
       role: userEndpointsLambdaIAMRole,
       architecture: lambda.Architecture.ARM_64,    // Use ARM_64 to save cost, but may need to tweak base on future lambda function content
-      handler: 'users.handler',                    // The users.js is the entry point, so set it as handler
+      handler: 'UserAPI.handler',                    // The users.js is the entry point, so set it as handler
       timeout: Duration.seconds(2),                       // Maximum 2s timeout
       code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
       layers: [lambdaLayer],
       environment: {
-        USER_PROFILE_TABLE: userpRrofileTable.tableName,
+        WEBSITE_TABLE: websiteTable.tableName,
         S3_BUCKET_ARN: contentBucket.bucketArn,
         COGNITO_POOL_ID: websiteUserPool.userPoolId,
         CORS_ALLOW_ORIGIN: webisteOrigin
       }
     });
 
+    // IAM role for Lambda order
+    const sellerEndpointsLambdaIAMRole = new iam.Role(this, 'sellerEndpointsLambdaIAMRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+    });
+
+    // Add basic lambda role
+    sellerEndpointsLambdaIAMRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"));
+    // grant dynamodb permission
+    websiteTable.grantReadWriteData(sellerEndpointsLambdaIAMRole);
+    // S3 bucket grant the permission
+    contentBucket.grantReadWrite(sellerEndpointsLambdaIAMRole);
+
+    // Seller Lambda endpoint
+    const sellerEndpointsLambda = new lambda.Function(this, 'sellerEndpointsLambda', {
+      runtime: lambda.Runtime.NODEJS_14_X,
+      role: sellerEndpointsLambdaIAMRole,
+      architecture: lambda.Architecture.ARM_64,    // Use ARM_64 to save cost, but may need to tweak base on future lambda function content
+      handler: 'SellerAPI.handler',                    // The sellers.js is the entry point, so set it as handler
+      timeout: Duration.seconds(2),                       // Maximum 2s timeout
+      code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
+      layers: [lambdaLayer],
+      environment: {
+        WEBSITE_TABLE: websiteTable.tableName,
+        S3_BUCKET_ARN: contentBucket.bucketArn,
+        CORS_ALLOW_ORIGIN: webisteOrigin
+      }
+    });
 
     // IAM role for Lambda order
     const orderEndpointsLambdaIAMRole = new iam.Role(this, 'orderEndpointsLambdaIAMRole', {
@@ -227,8 +231,7 @@ export class ServerlessS3SiteStack extends Stack {
     // Add basic lambda role
     orderEndpointsLambdaIAMRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"));
     // grant dynamodb permission
-    orderTable.grantReadWriteData(orderEndpointsLambdaIAMRole);
-    productTable.grantReadData(orderEndpointsLambdaIAMRole);
+    websiteTable.grantReadWriteData(orderEndpointsLambdaIAMRole);
     // S3 bucket grant the permission
     contentBucket.grantReadWrite(orderEndpointsLambdaIAMRole);
 
@@ -237,13 +240,13 @@ export class ServerlessS3SiteStack extends Stack {
       runtime: lambda.Runtime.NODEJS_14_X,
       role: orderEndpointsLambdaIAMRole,
       architecture: lambda.Architecture.ARM_64,    // Use ARM_64 to save cost, but may need to tweak base on future lambda function content
-      handler: 'orders.handler',                    // The users.js is the entry point, so set it as handler
+      handler: 'OrderAPI.handler',                    // The users.js is the entry point, so set it as handler
       timeout: Duration.seconds(2),                       // Maximum 2s timeout
       code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
       layers: [lambdaLayer],
       environment: {
-        PRODUCT_TABLE: productTable.tableName,
-        ORDER_TABLE: orderTable.tableName,
+        WEBSITE_TABLE: websiteTable.tableName,
+        S3_BUCKET_ARN: contentBucket.bucketArn,
         CORS_ALLOW_ORIGIN: webisteOrigin
       }
     });
@@ -256,7 +259,7 @@ export class ServerlessS3SiteStack extends Stack {
     // Add basic lambda role
     productEndpointsLambdaIAMRole.addManagedPolicy(iam.ManagedPolicy.fromAwsManagedPolicyName("service-role/AWSLambdaBasicExecutionRole"));
     // grant dynamodb permission
-    productTable.grantReadWriteData(productEndpointsLambdaIAMRole);
+    websiteTable.grantReadWriteData(productEndpointsLambdaIAMRole);
     // S3 bucket grant the permission
     contentBucket.grantReadWrite(productEndpointsLambdaIAMRole);
 
@@ -265,12 +268,13 @@ export class ServerlessS3SiteStack extends Stack {
       runtime: lambda.Runtime.NODEJS_14_X,
       role: productEndpointsLambdaIAMRole,
       architecture: lambda.Architecture.ARM_64,    // Use ARM_64 to save cost, but may need to tweak base on future lambda function content
-      handler: 'products.handler',                    // The users.js is the entry point, so set it as handler
+      handler: 'ProductAPI.handler',                    // The users.js is the entry point, so set it as handler
       timeout: Duration.seconds(2),                       // Maximum 2s timeout
       code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
       layers: [lambdaLayer],
       environment: {
-        PRODUCT_TABLE: productTable.tableName,
+        WEBSITE_TABLE: websiteTable.tableName,
+        S3_BUCKET_ARN: contentBucket.bucketArn,
         CORS_ALLOW_ORIGIN: webisteOrigin
       }
     });
@@ -302,12 +306,10 @@ export class ServerlessS3SiteStack extends Stack {
     usersResource.addMethod("GET", usersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-
-    }); // GET /
+    });
 
     // Add user resource for specific user
-    const userResource = serviceAPI.root.addResource('user');
-    const userIDResource = userResource.addResource('{userId}');
+    const userIDResource = serviceAPI.root.addResource('user').addResource('{userId}');
 
     // Integrate with users API
     // Utilize the cognito pool authorizer
@@ -315,11 +317,55 @@ export class ServerlessS3SiteStack extends Stack {
     userIDResource.addMethod("GET", usersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // GET /
+    });
     userIDResource.addMethod("PUT", usersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // PUT /
+    });
+
+    // Generate profile asset upload link
+    const userProfileAssetPreSignedPost = userIDResource.addResource('profileAsset').addResource('{profileAssetId}').addResource('presignedPost');
+    userProfileAssetPreSignedPost.addMethod("POST", usersIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    });
+
+    const sellersIntegration = new apigateway.LambdaIntegration(sellerEndpointsLambda, {
+      requestTemplates: { "application/json": '{ "statusCode": "200" }' }
+    });
+
+    // Add users resource for retriving all users
+    const sellersResource = serviceAPI.root.addResource('sellers');
+    sellersResource.addMethod("GET", sellersIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    });
+
+    // Add user resource for specific user
+    const sellerResource = serviceAPI.root.addResource('seller');
+    // Create/Activate seller
+    sellerResource.addMethod("POST", sellersIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    });
+    const sellerIDResource = sellerResource.addResource('{sellerId}');
+
+    // Integrate with sellers API
+    sellerIDResource.addMethod("GET", sellersIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    });
+    sellerIDResource.addMethod("PUT", sellersIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    });
+
+    // Generate profile asset upload link
+    const sellerProfileAssetPreSignedPost = sellerIDResource.addResource('profileAsset').addResource('{profileAssetId}').addResource('presignedPost');
+    sellerProfileAssetPreSignedPost.addMethod("POST", sellersIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    });
 
     const productsIntegration = new apigateway.LambdaIntegration(productEndpointsLambda, {
       requestTemplates: { "application/json": '{ "statusCode": "200" }' }
@@ -330,32 +376,36 @@ export class ServerlessS3SiteStack extends Stack {
     productsResource.addMethod("GET", productsIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // GET /
+    });
 
     // Add users resource for retriving all users
     const productResource = serviceAPI.root.addResource('product');
     productResource.addMethod("POST", productsIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // GET /
+    });
 
     const productIDResource = productResource.addResource('{productId}');
     // Integrate with product API
-    // Utilize the cognito pool authorizer
-    // https://docs.aws.amazon.com/cdk/api/v1/docs/aws-apigateway-readme.html#authorizers
     productIDResource.addMethod("GET", productsIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // GET /
+    });
     productIDResource.addMethod("POST", productsIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // POST /
+    });
     productIDResource.addMethod("PUT", productsIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // PUT /
+    });
 
+    // Generate profile asset upload link
+    const productProfileAssetPreSignedPost = productIDResource.addResource('profileAsset').addResource('{profileAssetId}').addResource('presignedPost');
+    productProfileAssetPreSignedPost.addMethod("POST", productsIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    });
 
     const ordersIntegration = new apigateway.LambdaIntegration(orderEndpointsLambda, {
       requestTemplates: { "application/json": '{ "statusCode": "200" }' }
@@ -366,32 +416,36 @@ export class ServerlessS3SiteStack extends Stack {
     ordersResource.addMethod("GET", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // GET /
+    });
 
     // Add users resource for retriving all users
     const orderResource = serviceAPI.root.addResource('order');
     orderResource.addMethod("POST", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // GET /
+    });
 
     const orderIDResource = orderResource.addResource('{orderId}');
-    // Integrate with product API
-    // Utilize the cognito pool authorizer
-    // https://docs.aws.amazon.com/cdk/api/v1/docs/aws-apigateway-readme.html#authorizers
+    // Integrate with order API
     orderIDResource.addMethod("GET", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // GET /
+    });
     orderIDResource.addMethod("POST", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // POST /
+    });
     orderIDResource.addMethod("PUT", ordersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
-    }); // PUT /
+    });
 
+    // Generate order asset upload link
+    const orderAssetPreSignedPost = orderIDResource.addResource('asset').addResource('{assetVersionId}').addResource('presignedPost');
+    orderAssetPreSignedPost.addMethod("POST", ordersIntegration, {
+      authorizer: websiteUserPoolAuth,
+      authorizationType: apigateway.AuthorizationType.COGNITO
+    });
 
     // Print output
     new CfnOutput(this, 'WebsiteCognitoUserPoolId', { value: websiteUserPool.userPoolId });
