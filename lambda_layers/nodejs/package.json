@@ -5,6 +5,6 @@
         "serverless_s3_site": "bin/serverless_s3_site.js"
     },
     "dependencies": {
-        "uuidv4": "^6.2.12"
+        "uuid": "^8.3.2"
     }
 }
