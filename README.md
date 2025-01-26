@@ -64,7 +64,7 @@ Update the `domainPrefix` in `lib/serverless_s3_site-stack.ts` to be unique, suc
     });
 ```
 
-Deploy the `cdk bootstrap stack` (only need to perform for first time if region change or first time setup)
+Deploy the `cdk bootstrap` (only need to perform for first time if region change or first time setup)
 ```
 # If first time
 cdk bootstrap

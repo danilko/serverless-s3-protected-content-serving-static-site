@@ -5,6 +5,7 @@
         "serverless_s3_site": "bin/serverless_s3_site.js"
     },
     "dependencies": {
+        "aws-sdk": "^2.1692.0",
         "uuid": "^8.3.2"
     }
 }

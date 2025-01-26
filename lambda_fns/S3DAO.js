@@ -3,15 +3,31 @@ const s3 = new AWS.S3({ "signatureVersion": "v4" });
 
 module.exports = {
     /**
+     * delete S3 prefix
+     * @param {*} prefix Target prefix to generated
+     * @returns a presigned url
+     *
+     */
+    deleteAsset: async function (prefix) {
+        await s3.deleteObject({
+            Bucket: process.env.S3_BUCKET_ARN.replace('arn:aws:s3:::', ''),
+            Key: prefix,
+        }, function(err, data) {
+            if (err) {
+                console.log(err, err.stack);
+                throw new Error(err);
+            }
+        });
+    },
+    /**
      * Create a S3 presigned url for target prefix
      * @param {*} prefix Target prefix to generated
-     * @param {*} asset Target asset to be retrieved/modified
      * @returns a presigned url
-     * 
+     *
      */
     createAssetGetSignedUrl: async function (prefix) {
         // set to a fix time, current is 10 min
-        var params = {
+        const params = {
             Bucket: process.env.S3_BUCKET_ARN.replace('arn:aws:s3:::', ''),
             Key: prefix,
             Expires: 600
@@ -25,9 +41,9 @@ module.exports = {
     /**
      * Create a S3 presigned post for target prefix
      * @param {*} prefix Target prefix to generated
-     * @param {*} uppderLimitSizeInByte  Target number in byte for maximum file size to be uploaded 
+     * @param {*} uppderLimitSizeInByte  Target number in byte for maximum file size to be uploaded
      * @returns a presigned post object for S3 upload
-     * 
+     *
      */
     createAssetPresignedPost: async function (prefix, uppderLimitSizeInByte) {
 
@@ -44,7 +60,7 @@ module.exports = {
                 ['content-length-range', 0, uppderLimitSizeInByte]]
         };
 
-        var preSignedPost = null;
+        let preSignedPost = null;
 
         await s3.createPresignedPost(params, function (err, data) {
             if (err) {

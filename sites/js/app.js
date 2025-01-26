@@ -1,348 +1,477 @@
-
 // This is an very raw sample to test the login
 // This will need clean up + improvement to be ready for production usage
 
-var signInUrl = '';
-var apiEndpointUrl = '';
+const global = this;
 
-var oauth2Endpoint = '';
+const initApp = async function () {
+  const config = await new Promise((resolve, reject) => {
+    // Get user info
+    fetch('/site_config.json', {
+      method: 'GET'
+    })
+      .then(response => response.json())
+      .then(data => {
+        resolve(data);
+      })
+      .catch((error) => {
+        console.error('Error:', error);
+        reject(error);
+      });
+  });
 
-var global = this;
-var userToken = null;
-var userInfo = null;
+  if (!config.signInUrl || config.signInUrl.trim().length === 0 || !config.apiEndpointUrl || config.apiEndpointUrl.trim().length === 0) {
+    await setNotification("site_config.json is not setup correctly");
+    return;
+  }
 
-var initApp = async function () {
-    var config = await new Promise((resolve, reject) => {
-        // Get user info
-        fetch('/site_config.json', {
-            method: 'GET'
-        })
-            .then(response => response.json())
-            .then(data => {
-                resolve(data);
-            })
-            .catch((error) => {
-                console.error('Error:', error);
-                reject(error);
-            });
-    });
+  // Setup the site
+  global.signInUrl = config.signInUrl.trim();
+  global.apiEndpointUrl = config.apiEndpointUrl.trim();
+  global.oauth2Endpoint = `https://${(new URL(global.signInUrl)).hostname}/`;
 
-    if (!config.signInUrl || config.signInUrl.trim().length == 0 || !config.apiEndpointUrl || config.apiEndpointUrl.trim().length == 0) {
-        setNotification("site_config.json is not setup correctly");
-        return;
-    }
-
-    // Setup the site
-    global.signInUrl = config.signInUrl.trim();
-    global.apiEndpointUrl = config.apiEndpointUrl.trim();
-    global.oauth2Endpoint = 'https://' + (new URL(signInUrl)).hostname + '/';
-
-    router();
+  await router();
 }
 
-var clearNotification = async function () {
-    document.getElementById('message').innerHTML = "";
+const clearNotification = async function () {
+  document.getElementById('message').innerHTML = "";
 }
 
-var setNotification = async function (message) {
-    var html = message;
-    var html = html + "<br/><input type=\"button\" value=\"Clear Message\" onClick=\"clearNotification()\"\>";
-    document.getElementById('message').innerHTML = html;
+const setNotification = async function (message) {
+  let messageDiv = document.getElementById('message');
+
+  let messageContentDiv = document.createElement("div");
+  messageContentDiv.textContent = message;
+  messageDiv.append(messageContentDiv);
+
+  let messageClearButton = document.createElement("input");
+  messageClearButton.type = "button";
+  messageClearButton.value = "Clear Message";
+  messageClearButton.addEventListener("click", () => {
+    clearNotification();
+  });
+  messageDiv.append(messageClearButton);
 }
 
-var router = async function () {
-    const url = new URL(window.location.href)
+const router = async function () {
+  const url = new URL(window.location.href)
 
-    if (url.hash.includes("#id_token=")) {
-        // This is from callback
-        extractUserToken(url.hash.replace('#', ''));
-    }
-    else {
-        await validateToken();
-    }
+  if (url.hash.includes("#id_token=")) {
+    // This is from callback
+    extractUserToken(url.hash.replace('#', ''));
+  } else {
+    await validateToken();
+  }
 }
 
-var validateToken = async function () {
-    if (global.userToken != null && global.userToken.expires_in != null && global.userToken.expires_in > Date.now()) {
-        return true;
-    }
-    else {
-        // Force user login
-        window.location.replace(signInUrl);
-    }
+const validateToken = async function () {
+  if (global.userToken != null && global.userToken.expires_in != null && global.userToken.expires_in > Date.now()) {
+    return true;
+  } else {
+    // Force user login
+    window.location.replace(global.signInUrl);
+  }
 }
 
-var extractUserToken = async function (hash) {
-    const searchParams = new URLSearchParams(hash);
+const extractUserToken = async function (hash) {
+  const searchParams = new URLSearchParams(hash);
 
-    // Get the current time in second
-    // https://stackoverflow.com/questions/3830244/get-current-date-time-in-seconds
-    // Then minus about 5 minute (300s) to get a buffer
-    var expires_in = Date.now() + (searchParams.get('expires_in') * 1000) - (300 * 1000);
+  // Get the current time in second
+  // https://stackoverflow.com/questions/3830244/get-current-date-time-in-seconds
+  // Then minus about 5 minute (300s) to get a buffer
+  let expires_in = Date.now() + (searchParams.get('expires_in') * 1000) - (300 * 1000);
 
-    global.userToken = {
-        id_token: searchParams.get('id_token'),
-        access_token: searchParams.get('access_token'),
-        token_type: searchParams.get('token_type'),
-        expires_in: expires_in
-    }
+  global.userToken = {
+    id_token: searchParams.get('id_token'),
+    access_token: searchParams.get('access_token'),
+    token_type: searchParams.get('token_type'),
+    expires_in: expires_in
+  }
 
-    var user = await new Promise((resolve, reject) => {
-        // Get user info
-        fetch(oauth2Endpoint + '/oauth2/userInfo', {
-            method: 'GET',
-            credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': global.userToken.token_type + ' ' + global.userToken.access_token
-            }
-        })
-            .then(response => response.json())
-            .then(data => {
-                resolve(data);
-            })
-            .catch((error) => {
-                console.error('Error:', error);
-                reject(error);
-            });
-    });
+  let user = await new Promise((resolve, reject) => {
+    // Get user info
+    fetch(global.oauth2Endpoint + '/oauth2/userInfo', {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': global.userToken.token_type + ' ' + global.userToken.access_token
+      }
+    })
+      .then(response => response.json())
+      .then(data => {
+        resolve(data);
+      })
+      .catch((error) => {
+        console.error('Error:', error);
+        reject(error);
+      });
+  });
+  await getUser(user.username);
 
-    await getUser(user.username);
-
-    // Clean the url header
-    //window.history.pushState("", "Test", "/");
+  // Clean the url header
+  window.history.pushState("", "Test", "/");
 }
 
 
 var getUser = async function (userId) {
-    // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-    fetch(apiEndpointUrl + 'user/' + userId, {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
-        }
+  // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+  fetch(global.apiEndpointUrl + 'user/' + userId, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+    }
+  })
+    .then(response => response.json())
+    .then(data => {
+      global.userInfo = data;
+      populateUserContent();
     })
-        .then(response => response.json())
-        .then(data => {
-            global.userInfo = data;
-            populateUserContent();
-        })
-        .catch((error) => {
-            console.error('Error:', error);
-        });
+    .catch((error) => {
+      console.error('Error:', error);
+    });
 
 }
 
 var getAllUserAPI = async function (lastEvaluatedId) {
-    var data = await new Promise((resolve, reject) => {
-        // Introduce query for lastEvaluatedId for pagination if one exist
-        var query = lastEvaluatedId ? '?lastEvaluatedId=' + lastEvaluatedId : '';
-        // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-        fetch(apiEndpointUrl + 'users' + query, {
-            method: 'GET',
-            credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
-            }
-        })
-            .then(response => response.json())
-            .then(data => {
-                resolve(data);
-            })
-            .catch((error) => {
-                console.error('Error:', error);
-                reject(error);
-            });
-    });
-
-    // Do not clear content if lastEvaluatedId is valid (as this is continous search)
-    // Clear content if lastEvaluatedId is invalid (indicate first search)
-    populateUserContents(data, lastEvaluatedId ? false : true);
-}
-
-var checkImage = async function (imageUrl) {
-    return await new Promise((resolve, reject) => {
-        fetch(imageUrl, {
-            method: 'GET',
-        })
-            .then(response => {
-                if (response.ok) {
-                    resolve(true);
-                }
-                else if (response.status == 404) {
-                    resolve(false);
-                }
-                else {
-                    throw new Error('Network response was not 2xx/404');
-                }
-            })
-            .catch((error) => {
-                console.error('Error:', error);
-                reject(error);
-            });
+  var data = await new Promise((resolve, reject) => {
+    // Introduce query for lastEvaluatedId for pagination if one exist
+    var query = lastEvaluatedId ? '?lastEvaluatedId=' + lastEvaluatedId : '';
+    // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+    fetch(global.apiEndpointUrl + 'users' + query, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+      }
     })
+      .then(response => response.json())
+      .then(data => {
+        resolve(data);
+      })
+      .catch((error) => {
+        console.error('Error:', error);
+        reject(error);
+      });
+  });
+
+  // Do not clear content if lastEvaluatedId is valid (as this is continous search)
+  // Clear content if lastEvaluatedId is invalid (indicate first search)
+  await populateUserContents(data, !lastEvaluatedId);
 }
 
 // Reference the users.js from lambda
 // Use the sts token to exchange for S3 presigned url to show on browser and download link
-var populateUserContent = async function () {
-
-    var html = "<div><br/>"
-
-    // Update user field
-    html = html + "<div>UserId: " + global.userInfo.id + "</div><br/>"
-    // Update nickname field as input filed
-    html = html + "<div>Nickname: <input type=\"text\" id=\"nickname\" value=\"" + global.userInfo.nickname + "\"></div><br/>";
-    html = html + "<div>Profile: <input type=\"text\" id=\"profile\" value=\"" + global.userInfo.profile + "\"></div><br/>";
-    html = html + "<input type=\"button\" onClick=\"updateUserInfo()\" value=\"Update User Info\">";
-    html = html + "<div id=\"profilePicture\"></div><br/>"
-
-    // Only present the field if this is to modify target user
-    html = html + "<div><label for=\"file\">Choose file to upload: </label><input type=\"file\" id=\"profilePictureFile\" accept=\".png\"><br/><input type=\"button\" onClick=\"uploadProfilePicture()\" value=\"Upload Profile Picture\"></div>"
-
-    // finish the div tag
-    html = html + "</div>"
-
-    document.getElementById('user').innerHTML = html;
-
-    // Check if image exist
-    var imageExist = await checkImage(global.userInfo.profilePicture);
-
-    if (imageExist) {
-        // Image exist and is loaded
-        document.getElementById('profilePicture').innerHTML = "<div><img style=\"width:128px;height:128px;\" src=\"" + global.userInfo.profilePicture + "\"></div>"
-    }
-    else {
-        // Image DID NOT LOAD
-        document.getElementById('profilePicture').innerHTML = "<div>Asset: NO PROFILE PICTURE EXIST, PLEASE UPLOAD</div>";
-    }
-}
-
-var populateUserContents = async function (data, clearContent) {
-    var html = "<div>"
-
-    for (var index = 0; index < data.users.length; index++) {
-        var userInfo = data.users[index];
-
-        html = html + "<div id=\"user_" + userInfo.id + "\">";
-
-        // Update user field
-        html = html + "<div>UserId: " + userInfo.id + "</div><br/>"
-
-        // Update nickname field as input filed
-        html = html + "<div>Nickname:" + userInfo.nickname + "</div><br/>";
-        html = html + "<div>Profile:" + userInfo.profile + "</div><br/>";
-
-        // Check if image exist
-        var imageExist = await checkImage(userInfo.profilePicture);
-
-        if (imageExist) {
-            // Image exist and is loaded
-            html = html + "<div id=\"profilePicture\"><img style=\"width:128px;height:128px;\" src=\"" + userInfo.profilePicture.getSignedUrl + "\"></div><br/>";
-        }
-        else {
-            // Image DID NOT LOAD
-            html = html + "<div id=\"profilePicture\">NO ASSET</div><br/>";
-        }
-        // finish the user div tag
-        html = html + "</div><br/>"
-    }
-
-    // finish the div tag
-    html = html + "</div>";
-
-    if (data.lastEvaluatedId) {
-        // Add a next button with last lastEvaluatedId
-        html = html + "<div><input type=\"button\" value =\"Next\" onClick=\"getAllUserAPI(" + data.lastEvaluatedId + ")\"></div><br/>"
-    }
-
-    // Clear previous results 
-    if (clearContent) {
-        // Then just replace whole content
-        document.getElementById('users').innerHTML = html;
-    }
-    else {
-        // Otherwise clear
-        document.getElementById('users').innerHTML = document.getElementById('users').innerHTML + html;
-    }
+const populateUserContent = async function () {
+  document.getElementById('user').innerHTML = "";
+  document.getElementById('user').append(await createUserDiv(global.userInfo, true));
 
 }
 
-var updateUserInfo = async function () {
-    // get the value
-    var body = {
-        nickname: document.getElementById('nickname').value,
-        profile: document.getElementById('profile').value
+const populateUserAssetDiv = async function (userAssetDiv, userId, asset, isEditable) {
+  // Check if image exist
+  let userProfileAssetStatus = document.createElement("div");
+  userProfileAssetStatus.textContent = `asset ${asset.id} status: ${asset.status}`;
+  userAssetDiv.append(userProfileAssetStatus);
+
+  if (asset.status === "UPLOADED") {
+    let userAssetImg = document.createElement("img");
+    userAssetImg.style = "width:128px;height:128px;";
+    userAssetImg.src = asset.url;
+    userAssetImg.alt = "";
+    userAssetDiv.append(userAssetImg);
+  } else {
+    let message = "STATUS IS NOT UPLOADED";
+    if (isEditable) {
+      message = `${message} PLEASE UPLOAD.`
     }
+    let userAssetMessage = document.createElement("div");
+    userAssetMessage.textContent = message;
+    userAssetDiv.append(userAssetMessage);
+  }
+  userAssetDiv.append(document.createElement("br"));
 
-    // Update content
-    // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-    fetch(apiEndpointUrl + 'user/' + global.userInfo.id, {
-        method: 'PUT',
-        credentials: 'include',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
-        },
-        body: JSON.stringify(body)
-    })
-        .then(response => response.json())
-        .then(data => {
-            global.userInfo = data;
-            populateUserContent();
-        })
-        .catch((error) => {
-            console.error('Error:', error);
-        });
-}
+  if (isEditable) {
+    let updateAssetFileLable = document.createElement("label");
+    updateAssetFileLable.for = `user_${userId}_asset_${asset.id}_file`
+    updateAssetFileLable.value = "Select new file for asset: ";
+    userAssetDiv.append(updateAssetFileLable);
 
-var uploadProfilePicture = async function () {
+    let updateAssetFile = document.createElement("input");
+    updateAssetFile.id = `user_${userId}_asset_${asset.id}_file`;
+    updateAssetFile.accept = ".png";
+    updateAssetFile.type = "file";
+    userAssetDiv.append(updateAssetFile);
 
-    // fetch the presigned post, which is a temporary form data object for uploading to S3 for target asset
-    var response = await new Promise((resolve, reject) => {
-        fetch(apiEndpointUrl + 'user/' + global.userInfo.id + '/profileAsset/profilePicture.png/presignedPost', {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
-            }
-        })
-            .then(response => response.json())
-            .then(data => {
-                resolve(data);
-            })
-            .catch((error) => {
-                setNotification('FAIL TO UPLOAD PROFILE PICTURE WITH ERROR ' + error);
+    userAssetDiv.append(document.createElement("br"));
 
-                reject(error);
-            });
+    let updateAssetButton = document.createElement("input");
+    updateAssetButton.addEventListener("click", () => {
+      uploadAsset(userId, asset.id, isEditable);
     });
-
-    // Reference from https://bobbyhadz.com/blog/notes-s3-signed-url
-    const formData = new FormData();
-
-    Object.entries(response.fields).forEach(([k, v]) => {
-        formData.append(k, v);
+    updateAssetButton.type = "button";
+    updateAssetButton.value = "Upload Asset";
+    userAssetDiv.append(updateAssetButton);
+    userAssetDiv.append(document.createElement("br"));
+    let deleteAssetButton = document.createElement("input");
+    deleteAssetButton.addEventListener("click", () => {
+      deleteAsset(userId, asset.id);
     });
+    deleteAssetButton.type = "button";
+    deleteAssetButton.value = "Delete Asset";
+    userAssetDiv.append(deleteAssetButton);
+    userAssetDiv.append(document.createElement("br"));
 
-    formData.append('file', document.getElementById('profilePictureFile').files[0]);
+    let refreshAssetButton = document.createElement("input");
+    refreshAssetButton.addEventListener("click", () => {
+      getAsset(userId, asset.id, isEditable);
+    });
+    refreshAssetButton.type = "button";
+    refreshAssetButton.value = "Refresh Asset";
+    userAssetDiv.append(refreshAssetButton);
+    userAssetDiv.append(document.createElement("br"));
+  }
+  userAssetDiv.append(document.createElement("br"));
+}
 
-    // post data
-    fetch(response.url, {
-        method: 'POST',
-        body: formData
+const createUserDiv = async function (userInfo, isEditable) {
+
+  let userDiv = document.createElement("div");
+  userDiv.id = `user_${userInfo.id}`;
+
+  // Update user field
+  let userIdDiv = document.createElement("div");
+  userIdDiv.textContent = `UserId: ${userInfo.id}`;
+  userDiv.append(userIdDiv);
+
+  userDiv.append(document.createElement("br"));
+
+  // Update nickname/profile
+  let userNicknameDiv = document.createElement("div");
+  userNicknameDiv.textContent = `Nickname:`;
+  if (isEditable) {
+    let textField = document.createElement("input");
+    textField.type = "text"
+    textField.id = "nickname";
+    textField.value = global.userInfo.nickname;
+    userNicknameDiv.append(textField);
+  } else {
+    userNicknameDiv.textContent = `Nickname: ${global.userInfo.nickname}`;
+  }
+  userDiv.append(userNicknameDiv);
+
+  userDiv.append(document.createElement("br"));
+
+  let userProfileDiv = document.createElement("div");
+  userProfileDiv.textContent = `Profile: `;
+  if (isEditable) {
+    let textField = document.createElement("input");
+    textField.type = "text"
+    textField.id = "profile";
+    textField.value = global.userInfo.profile;
+    userProfileDiv.append(textField);
+  } else {
+    userProfileDiv.textContent = `Nickname: ${userInfo.profile}`;
+  }
+  userDiv.append(userProfileDiv);
+
+  userDiv.append(document.createElement("br"));
+
+
+  if (isEditable) {
+    let updateProfileButton = document.createElement("input");
+    updateProfileButton.addEventListener("click", () => {
+      updateUserInfo();
+    });
+    updateProfileButton.type = "button";
+    updateProfileButton.value = "Update User Info";
+    userDiv.append(updateProfileButton);
+
+    userDiv.append(document.createElement("br"));
+
+  }
+
+  let userProfileAsset = document.createElement("div");
+  userProfileAsset.id = `user_${userInfo.id}_asset_${userInfo.profileAsset.id}`;
+  userDiv.append(userProfileAsset);
+  await populateUserAssetDiv(userProfileAsset,
+    userInfo.id, userInfo.profileAsset, isEditable);
+
+  userDiv.append(document.createElement("br"));
+
+  return userDiv;
+}
+
+const populateUserContents = async function (data, clearContent) {
+
+  let usersDiv = document.getElementById('users');
+
+  // Clear previous results
+  if (clearContent) {
+    // Then just replace whole content
+    usersDiv.innerHTML = "";
+  }
+
+  // Append new users
+  for (let index = 0; index < data.users.length; index++) {
+    usersDiv.append(await createUserDiv(data.users[index], false));
+  }
+
+  let usersNextDiv = document.getElementById('usersNext');
+  usersNextDiv.innerHTML = "";
+
+
+  // Add a next button with last lastEvaluatedId
+  let userNextButton = document.createElement("input");
+  userNextButton.addEventListener("click", () => {
+    getAllUserAPI(data.lastEvaluatedId);
+  });
+  userNextButton.type = "button";
+  userNextButton.value = "Next Page";
+  usersNextDiv.append(userNextButton);
+  if (data.lastEvaluatedId) {
+    userNextButton.setAttribute("value", "No More Next Page");
+    userNextButton.disabled = true;
+  }
+
+  usersNextDiv.append(document.createElement("br"));
+
+}
+
+const updateUserInfo = async function () {
+  // get the value
+  let body = {
+    nickname: document.getElementById('nickname').value,
+    profile: document.getElementById('profile').value
+  }
+
+  // Update content
+  // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+  fetch(global.apiEndpointUrl + 'user/' + global.userInfo.id, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+    },
+    body: JSON.stringify(body)
+  })
+    .then(response => response.json())
+    .then(data => {
+      global.userInfo = data;
+      populateUserContent();
     })
-        .then(data => {
-            // reload image
-            populateUserContent();
-        })
-        .catch((error) => {
-            setNotification('FAIL TO UPLOAD PROFILE PICTURE WITH ERROR ' + error);
+    .catch((error) => {
+      console.error('Error:', error);
+    });
+}
 
-            console.error('Error:', error);
-        });
+const getAsset = async function (userId, assetId, isEditable) {
+
+  // get asset metadata such as status/presigned url
+  let response = await new Promise((resolve, reject) => {
+    fetch(`${global.apiEndpointUrl}user/${userId}/asset/${assetId}`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+      }
+    })
+      .then(response => response.json())
+      .then(data => {
+        resolve(data);
+      })
+      .catch((error) => {
+        setNotification(`FAIL TO GET ASSET ${assetId} ON USER ${userId} WITH ERROR: ${error}`);
+
+        reject(error);
+      });
+  });
+
+  let assetDiv = document.getElementById(`user_${userId}_asset_${assetId}`);
+  if (assetDiv) {
+    // clear content
+    assetDiv.innerHTML = "";
+    await populateUserAssetDiv(assetDiv, userId, response, isEditable);
+  }
+}
+
+const deleteAsset = async function (userId, assetId) {
+  // fetch the presigned post, which is a temporary form data object for uploading to S3 for target asset
+  let response = await new Promise((resolve, reject) => {
+    fetch(`${global.apiEndpointUrl}user/${userId}/asset/${assetId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+      }
+    })
+      .then(response => response.json())
+      .then(data => {
+        resolve(data);
+      })
+      .catch((error) => {
+        setNotification(`FAIL TO GET ASSET ${assetId} ON USER ${userId} WITH ERROR: ${error}`);
+
+        reject(error);
+      });
+  });
+
+  document.getElementById(`user_${userId}_asset_${assetId}`).remove();
+
+  // If this is profile picture, reload user info
+  if (assetId === userId) {
+    await updateUserInfo();
+  }
+}
+
+const uploadAsset = async function (userId, assetId, isEditable) {
+
+  // fetch the presigned post, which is a temporary form data object for uploading to S3 for target asset
+  let response = await new Promise((resolve, reject) => {
+    fetch(`${global.apiEndpointUrl}user/${userId}/asset/${assetId}/presignedPost`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+      }
+    })
+      .then(response => response.json())
+      .then(data => {
+        resolve(data);
+      })
+      .catch((error) => {
+        setNotification(`FAIL TO UPLOAD ASSET ${assetId} ON USER ${userId} WITH ERROR: ${error}`);
+
+        reject(error);
+      });
+  });
+
+  // Reference from https://bobbyhadz.com/blog/notes-s3-signed-url
+  const formData = new FormData();
+
+  Object.entries(response.fields).forEach(([k, v]) => {
+    formData.append(k, v);
+  });
+
+  formData.append('file', document.getElementById(`user_${userId}_asset_${assetId}_file`).files[0]);
+
+  // post data
+  fetch(response.url, {
+    method: 'POST',
+    body: formData
+  })
+    .then(data => {
+      getAsset(userId, assetId, isEditable)
+    })
+    .catch((error) => {
+      setNotification('FAIL TO UPLOAD PROFILE PICTURE WITH ERROR ' + error);
+
+      console.error('Error:', error);
+    });
 }
