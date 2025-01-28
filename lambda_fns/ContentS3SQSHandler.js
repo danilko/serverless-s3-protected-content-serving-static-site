@@ -3,6 +3,8 @@ This code handles the incoming SQS message from Content S3 bucket
 */
 
 const UserDAO = require('./UserDAO.js')
+const ContentS3FileDAO = require('./ContentS3FileDAO.js')
+const S3DAO = require('./S3DAO.js');
 
 exports.handler = async (event) => {
   // SQS event has 'Records' which each contain { messageId, body, ... }
@@ -42,18 +44,22 @@ exports.handler = async (event) => {
 
       // We expect a path: /user/<userId>/asset/<assetId>
       // Regex below captures <userId> and <assetId>
-      const match = decodedKey.match(/^\/?user\/([^/]+)\/asset\/([^/]+)/);
+      const match = decodedKey.match(/^\/?user\/([^/]+)\/asset-raw\/([^/]+)/);
 
       if (!match) {
-        console.debug(`Skipping Key "${decodedKey}" as it does not match the required pattern: user/<userId>/asset/<assetId>`);
+        console.debug(`Skipping Key "${decodedKey}" as it does not match the required pattern: user/<userId>/asset-raw/<assetId>`);
         continue;
       }
 
       const [_, userId, assetId] = match;
+
       try {
+        // check if the uploaded prefix need transcoder
+        const isAssetHiRes = await ContentS3FileDAO.downscaleImage(userId, assetId);
+
         // Update the user's asset status to 'UPLOADED'
-        await UserDAO.updateUserAssetStatus(userId, assetId, UserDAO.ASSET_STATUS_UPLOADED);
-        console.debug(`Updated user ${userId} asset ${assetId} status to UPLOADED`);
+        await UserDAO.updateUserAssetStatus(userId, assetId, isAssetHiRes, UserDAO.ASSET_STATUS_UPLOADED);
+        console.debug(`Updated user ${userId} asset ${assetId} status to UPLOADED and hi-res ${isAssetHiRes}`);
       } catch (updateErr) {
         console.error('Error updating user asset status:', updateErr);
       }

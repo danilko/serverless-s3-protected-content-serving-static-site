@@ -274,9 +274,24 @@ const populateUserAssetDiv = async function (userAssetDiv, userId, asset, isEdit
   if (asset.status === "UPLOADED") {
     let userAssetImg = document.createElement("img");
     userAssetImg.style = "width:128px;height:128px;";
-    userAssetImg.src = asset.url;
+    userAssetImg.src = asset.urls.url;
     userAssetImg.alt = "";
     userAssetDiv.append(userAssetImg);
+
+    userAssetDiv.append(document.createElement("br"));
+
+    const link = document.createElement('a');
+    if(asset.urls.hiResUrl) {
+      link.href = asset.urls.hiResUrl;
+    }
+    else {
+      link.href = asset.urls.url;
+    }
+    link.target = '_blank';                               // Ensures the link opens in a new tab/window
+    link.textContent = 'Download Original File';          // Visible text for the link
+
+    // Append the link to the document (e.g., to the body)
+    userAssetDiv.append(link);
   } else {
     let message = "STATUS IS NOT UPLOADED";
     if (isEditable) {

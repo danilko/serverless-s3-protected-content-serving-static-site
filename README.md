@@ -29,12 +29,15 @@ Overall flow:
 3. There is API gateway secured by AWS Cognito (OAuth2 flow) and a lambda processing backend. 
 4. After the backend validate user token and request, it creates a dynamodb record with the asset id with status "PENDING_UPLOAD", and create presigned post with AWS STS token to s3. The sts has a time limit with a pre-defined role/policy.
 5. Browser in background get the presigned post and upload file to S3 with the sts info included in it
-6. After the upload to s3 complete, s3 will send a SQS notification event (only fire on createObject (which covers new/replace of file)). There is one Lambda SQS consumer to poll SQS periodically. Once lambda receives a message, it will check the prefix and extract user id/asset id, and update dynamdb record status from "PENDING_UPLOAD" to "UPLOADED".
+6. After the upload to s3 complete, s3 will send a SQS notification event (only fire on createObject (which covers new/replace of file)). There is one Lambda SQS consumer to poll SQS periodically. Once lambda receives a message.
+7. The SQS handler will check the prefix and extract user id/asset id, download the image to check image width and high and scale down the image while keeping the proportion. It then push the asset-hi-res to hi-res prefix, and original/scale down to asset prefix. Delete the original one in assetraw. 
+8. The SQS handler than update dynamdb record status from "PENDING_UPLOAD" to "UPLOADED".
 7. User can use "refresh asset" to check if the asset status become "UPLOADED". Once the status is "UPLOADED", the payload will incude a S3 presigned url to get binary content from s3 (also secured with STS).
 8. User can select image to upload to repeat above. Or delete (which will reset the asset back to pending upload status).
 
 Note: the upload to s3 is quite quick, the reason it takes few minutes is because SQS polling is on batch for performance reason, so it takes sometime for sqs status to come in and update dynamoDB.
 Note: there is restriction set on presigned post (limit time token + 5kb upload) and presigned get(time token)
+Note: the scale down image logic may not be most optimial, and may wish to do additional virus scan/check before actual processing the image.
 
 ## Requirement Setup
 Please installed following tools:
@@ -59,6 +62,7 @@ npm install
 Install dependencies for lambda
 ```
 cd lambda_layers
+npm install --arch=x64 --platform=linux sharp
 npm install
 cd ..
 ```

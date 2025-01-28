@@ -114,7 +114,7 @@ export class ServerlessS3SiteStack extends Stack {
 
     const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName;
     // Enable below only for local test
-    // const webisteOrigin = 'http://localhost:8080';
+    const webisteOrigin = 'http://localhost:8080';
 
     // Add CORS to allow the cloudfront website to access the content bucket
     // Currently enable GET/POST/PUT/DELETE to retrieve and update content
@@ -244,7 +244,7 @@ export class ServerlessS3SiteStack extends Stack {
     websiteTable.grantReadWriteData(sqsConsumerLambdaIAMRole);
 
     // S3 bucket grant read permission for checking s3 prefix info
-    contentBucket.grantRead(sqsConsumerLambdaIAMRole);
+    contentBucket.grantReadWrite(sqsConsumerLambdaIAMRole);
 
     // --------------------------------------------------------------------------------------
     // Create a Lambda function that will consume messages from the queue
@@ -253,7 +253,7 @@ export class ServerlessS3SiteStack extends Stack {
       runtime: lambda.Runtime.NODEJS_LATEST,
       role: sqsConsumerLambdaIAMRole,
       handler: 'ContentS3SQSHandler.handler',
-      timeout: Duration.seconds(5),                       // Maximum 5s timeout
+      timeout: Duration.seconds(10),                       // Maximum 10s timeout
       code: lambda.Code.fromAsset(path.join(__dirname, '/../lambda_fns')),
       layers: [lambdaLayer],
       environment: {

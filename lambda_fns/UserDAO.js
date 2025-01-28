@@ -1,6 +1,5 @@
 const AWS = require('aws-sdk');
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
-const cognitoidentityserviceprovider = new AWS.CognitoIdentityServiceProvider();
 
 const S3DAO = require('./S3DAO.js')
 
@@ -102,7 +101,8 @@ module.exports = {
       for (let index = 0; index < response.Items.length; index++) {
         if (generatedAsset) {
           // Get Asset link for each asset
-          response.Items[index].url = await this.createAssetGetSignedUrl(userId, response.Items[index].id);
+          response.Items[index].urls = await this.createAssetGetSignedUrl(userId, response.Items[index].id,
+            response.Items[index].isAssetHiRes);
         }
       }
 
@@ -172,7 +172,7 @@ module.exports = {
 
       // Get Asset url for asset link if upload is completed
       if (generatedAsset && assetRecord.Item.status === 'UPLOADED') {
-        assetRecord.Item.url = await this.createAssetGetSignedUrl(userId, assetId);
+        assetRecord.Item.urls = await this.createAssetGetSignedUrl(userId, assetId, assetRecord.Item.isAssetHiRes);
       }
     }
 
@@ -254,12 +254,13 @@ module.exports = {
           "pk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}${assetId}`,
           "sk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}`,
         },
-        UpdateExpression: "set #gsi_pk = :gsi_pk, #gsi_sk = :gsi_sk,  #id = :id,  #lastModfiedTS = :lastModfiedTS, #status = :status",
+        UpdateExpression: "set #gsi_pk = :gsi_pk, #gsi_sk = :gsi_sk,  #id = :id,  #lastModfiedTS = :lastModfiedTS, #isAssetHiRes = :isAssetHiRes, #status = :status",
         ExpressionAttributeNames: {
           "#id" : "id",
           "#gsi_pk": GSI_PK_NAME,
           "#gsi_sk": GSI_SK_NAME,
           "#lastModfiedTS": "lastModfiedTS",
+          "#isAssetHiRes": "isAssetHiRes",
           "#status": "status",
         },
         ExpressionAttributeValues: {
@@ -267,6 +268,7 @@ module.exports = {
           ":gsi_pk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}`,
           ":gsi_sk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}${assetId}`,
           ":lastModfiedTS": Date.now(),
+          ":isAssetHiRes": false,
           ":status": this.ASSET_STATUS_PENDING_UPLOAD,
         },
         ReturnValues: "ALL_NEW"
@@ -285,10 +287,11 @@ module.exports = {
    * Modify or create a user record base on username
    * @param {*} userId
    * @param {*} assetId assetId to be updated
+   * @param isAssetHiRes boolean to indicate if the assset has hi-res
    * @param status asset status to be updated
    * @returns record
    */
-  updateUserAssetStatus: async function (userId, assetId, status) {
+  updateUserAssetStatus: async function (userId, assetId, isAssetHiRes, status) {
     // update dynamodb with default values
     await dynamoDB
       .update({
@@ -297,15 +300,17 @@ module.exports = {
           "pk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}${assetId}`,
           "sk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}`,
         },
-        UpdateExpression: "set #lastModfiedTS = :lastModfiedTS, #status = :status",
+        UpdateExpression: "set #lastModfiedTS = :lastModfiedTS, #isAssetHiRes = :isAssetHiRes, #status = :status",
         // ConditionExpression ensures the item already exists
         ConditionExpression: 'attribute_exists(pk) AND attribute_exists(sk)',
         ExpressionAttributeNames: {
           "#lastModfiedTS": "lastModfiedTS",
+          "#isAssetHiRes": "isAssetHiRes",
           "#status": "status",
         },
         ExpressionAttributeValues: {
           ":lastModfiedTS": Date.now(),
+          ":isAssetHiRes": isAssetHiRes,
           ":status": status,
         },
         ReturnValues: "ALL_NEW"
@@ -332,21 +337,32 @@ module.exports = {
 
     // only delete s3 if there is an actual deletion
     if (response.Attributes) {
-      await S3DAO.deleteAsset(`/user/${userId}/asset/${assetId}`);
+      await S3DAO.deleteAsset(`/user/${userId}/${S3DAO.assetPrefix}/${assetId}`);
+      await S3DAO.deleteAsset(`/user/${userId}/${S3DAO.assetRawPrefix}/${assetId}`);
+      await S3DAO.deleteAsset(`/user/${userId}/${S3DAO.assetHiResPrefix}/${assetId}`);
     }
   },
   /**
    * Create a S3 getsigned url assoicated with input target asset with getSignedUrl and preSignedPost base on input
    * @param {*} userId user's id for target asset to be retrieved/modified
    * @param {*} assetId Target assetId to be retrieved/modified
+   * @param isAssetHiRes flag if want to download highresolution asset
    * @returns a presigned url
    *
    */
-  createAssetGetSignedUrl: async function (userId, assetId) {
+  createAssetGetSignedUrl: async function (userId, assetId, isAssetHiRes) {
     // retrieve the url
     // set the expiration to 5 min, it will not be longer than the sts token
     // https://docs.aws.amazon.com/AmazonS3/latest/userguide/ShareObjectPreSignedURL.html
-    return await S3DAO.createAssetGetSignedUrl(`/user/${userId}/asset/${assetId}`);
+    let response = {};
+
+    response.url = await S3DAO.createAssetGetSignedUrl(`/user/${userId}/${S3DAO.assetPrefix}/${assetId}`);
+    // if a high-res available, also prepares it
+    if(isAssetHiRes) {
+      response.hiResUrl = await S3DAO.createAssetGetSignedUrl(`/user/${userId}/${S3DAO.assetHiResPrefix}/${assetId}`);
+    }
+
+    return response;
   },
   /**
    * Create a S3 presigned post object assoicated with input target asset
@@ -357,7 +373,8 @@ module.exports = {
    *
    */
   createAssetPresignedPost: async function (userId, assetId, uppderLimitSizeInByte = S3DAO.defaultUppderLimitSizeInByte) {
-    return await S3DAO.createAssetPresignedPost(`/user/${userId}/asset/${assetId}`, uppderLimitSizeInByte);
+    // Send to the assetraw prefix instead of asset, so can let SQS handler latter do additional processing
+    return await S3DAO.createAssetPresignedPost(`/user/${userId}/${S3DAO.assetRawPrefix}/${assetId}`, uppderLimitSizeInByte);
   },
   maxQuerySize: 5,
   ASSET_STATUS_PENDING_UPLOAD: "PENDING_UPLOAD",
