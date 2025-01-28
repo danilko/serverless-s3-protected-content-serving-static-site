@@ -114,7 +114,7 @@ export class ServerlessS3SiteStack extends Stack {
 
     const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName;
     // Enable below only for local test
-    const webisteOrigin = 'http://localhost:8080';
+    //const webisteOrigin = 'http://localhost:8080';
 
     // Add CORS to allow the cloudfront website to access the content bucket
     // Currently enable GET/POST/PUT/DELETE to retrieve and update content
