@@ -115,18 +115,19 @@ const extractUserToken = async function (hash) {
 
 var getUser = async function (userId) {
   // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-  fetch(global.apiEndpointUrl + 'user/' + userId, {
+  fetch(`${global.apiEndpointUrl}user/${userId}`, {
     method: 'GET',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+      'Authorization': `${global.userToken.token_type} ${global.userToken.id_token}`
     }
   })
     .then(response => response.json())
     .then(data => {
       global.userInfo = data;
       populateUserContent();
+      populateUploadNewAssetUploadDiv();
     })
     .catch((error) => {
       console.error('Error:', error);
@@ -134,17 +135,17 @@ var getUser = async function (userId) {
 
 }
 
-var getAllUserAPI = async function (lastEvaluatedId) {
-  var data = await new Promise((resolve, reject) => {
+var getAllAssetsAPI = async function (lastEvaluatedId) {
+  const data = await new Promise((resolve, reject) => {
     // Introduce query for lastEvaluatedId for pagination if one exist
-    var query = lastEvaluatedId ? '?lastEvaluatedId=' + lastEvaluatedId : '';
+    const query = lastEvaluatedId ? '?lastEvaluatedId=' + lastEvaluatedId : '';
     // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-    fetch(global.apiEndpointUrl + 'users' + query, {
+    fetch(`${global.apiEndpointUrl}user/${global.userInfo.id}/assets${query}`, {
       method: 'GET',
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+        'Authorization': `${global.userToken.token_type} ${global.userToken.id_token}`
       }
     })
       .then(response => response.json())
@@ -159,7 +160,101 @@ var getAllUserAPI = async function (lastEvaluatedId) {
 
   // Do not clear content if lastEvaluatedId is valid (as this is continous search)
   // Clear content if lastEvaluatedId is invalid (indicate first search)
-  await populateUserContents(data, !lastEvaluatedId);
+  await populateAssetsContent(data, !lastEvaluatedId);
+}
+
+const populateAssetsContent = async function (data, clearContent) {
+
+  let assetsDiv = document.getElementById('assets');
+
+  // Clear previous results
+  if (clearContent) {
+    // Then just replace whole content
+    assetsDiv.innerHTML = "";
+  }
+
+  // Append new users
+  for (let index = 0; index < data.assets.length; index++) {
+    let assetDiv = document.createElement("div");
+    assetDiv.id = `user_${userInfo.id}_asset_${data.assets[index].id}`;
+    assetsDiv.append(assetDiv);
+
+    await populateUserAssetDiv(assetDiv, userInfo.id, data.assets[index], true);
+  }
+
+  let assetsNextDiv = document.getElementById('assetsNext');
+  assetsNextDiv.innerHTML = "";
+
+  // Add a next button with last lastEvaluatedId
+  let nextButton = document.createElement("input");
+  nextButton.addEventListener("click", () => {
+    getAllUsersAPI(data.lastEvaluatedId);
+  });
+  nextButton.type = "button";
+  nextButton.value = "Next Page";
+  assetsNextDiv.append(nextButton);
+  if (data.lastEvaluatedId) {
+    nextButton.value = "No More Next Page";
+    nextButton.disabled = true;
+  }
+
+  assetsNextDiv.append(document.createElement("br"));
+}
+
+const populateUploadNewAssetUploadDiv = async function () {
+  let uploadNewAssetDiv = document.getElementById("uploadNewAsset");
+  uploadNewAssetDiv.innerHTML = "";
+
+  let updateAssetFileLable = document.createElement("label");
+  updateAssetFileLable.for = `new_asset_file`
+  updateAssetFileLable.value = "Select new file for new asset: ";
+  uploadNewAssetDiv.append(updateAssetFileLable);
+
+  let updateAssetFile = document.createElement("input");
+  updateAssetFile.id = `new_asset_file`;
+  updateAssetFile.accept = ".png";
+  updateAssetFile.type = "file";
+  uploadNewAssetDiv.append(updateAssetFile);
+
+  uploadNewAssetDiv.append(document.createElement("br"));
+
+  let updateAssetButton = document.createElement("input");
+  updateAssetButton.addEventListener("click", () => {
+    uploadAsset(global.userInfo.id, 'new_asset', true);
+  });
+  updateAssetButton.type = "button";
+  updateAssetButton.value = "Upload New Asset";
+  uploadNewAssetDiv.append(updateAssetButton);
+  uploadNewAssetDiv.append(document.createElement("br"));
+}
+
+
+const getAllUsersAPI = async function (lastEvaluatedId) {
+  const data = await new Promise((resolve, reject) => {
+    // Introduce query for lastEvaluatedId for pagination if one exist
+    const query = lastEvaluatedId ? '?lastEvaluatedId=' + lastEvaluatedId : '';
+    // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+    fetch(`${global.apiEndpointUrl}users${query}`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `${global.userToken.token_type} ${global.userToken.id_token}`
+      }
+    })
+      .then(response => response.json())
+      .then(data => {
+        resolve(data);
+      })
+      .catch((error) => {
+        console.error('Error:', error);
+        reject(error);
+      });
+  });
+
+  // Do not clear content if lastEvaluatedId is valid (as this is continous search)
+  // Clear content if lastEvaluatedId is invalid (indicate first search)
+  await populateUsersContent(data, !lastEvaluatedId);
 }
 
 // Reference the users.js from lambda
@@ -304,7 +399,7 @@ const createUserDiv = async function (userInfo, isEditable) {
   return userDiv;
 }
 
-const populateUserContents = async function (data, clearContent) {
+const populateUsersContent = async function (data, clearContent) {
 
   let usersDiv = document.getElementById('users');
 
@@ -326,7 +421,7 @@ const populateUserContents = async function (data, clearContent) {
   // Add a next button with last lastEvaluatedId
   let userNextButton = document.createElement("input");
   userNextButton.addEventListener("click", () => {
-    getAllUserAPI(data.lastEvaluatedId);
+    getAllUsersAPI(data.lastEvaluatedId);
   });
   userNextButton.type = "button";
   userNextButton.value = "Next Page";
@@ -349,12 +444,12 @@ const updateUserInfo = async function () {
 
   // Update content
   // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
-  fetch(global.apiEndpointUrl + 'user/' + global.userInfo.id, {
+  fetch(`${global.apiEndpointUrl}user/${global.userInfo.id}`, {
     method: 'PUT',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+      'Authorization': `${global.userToken.token_type} ${global.userToken.id_token}`
     },
     body: JSON.stringify(body)
   })
@@ -377,7 +472,7 @@ const getAsset = async function (userId, assetId, isEditable) {
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+        'Authorization': `${global.userToken.token_type} ${global.userToken.id_token}`
       }
     })
       .then(response => response.json())
@@ -395,8 +490,17 @@ const getAsset = async function (userId, assetId, isEditable) {
   if (assetDiv) {
     // clear content
     assetDiv.innerHTML = "";
-    await populateUserAssetDiv(assetDiv, userId, response, isEditable);
   }
+  else {
+    // append the new div as last item
+    let assetsDiv = document.getElementById('assets');
+    assetDiv = document.createElement("div");
+    assetDiv.id = `user_${userId}_asset_${assetId}`;
+    assetsDiv.append(assetDiv);
+  }
+
+  await populateUserAssetDiv(assetDiv, userId, response, isEditable);
+
 }
 
 const deleteAsset = async function (userId, assetId) {
@@ -407,7 +511,7 @@ const deleteAsset = async function (userId, assetId) {
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+        'Authorization': `${global.userToken.token_type} ${global.userToken.id_token}`
       }
     })
       .then(response => response.json())
@@ -430,15 +534,21 @@ const deleteAsset = async function (userId, assetId) {
 }
 
 const uploadAsset = async function (userId, assetId, isEditable) {
+  let targetUrl = `${global.apiEndpointUrl}user/${userId}/asset/${assetId}/presignedPost`;
+  let targetFileDivId = `user_${userId}_asset_${assetId}_file`;
+  if (assetId === "new_asset") {
+    targetUrl = `${global.apiEndpointUrl}user/${userId}/asset/presignedPost`;
+    targetFileDivId =`new_asset_file`;
+  }
 
   // fetch the presigned post, which is a temporary form data object for uploading to S3 for target asset
   let response = await new Promise((resolve, reject) => {
-    fetch(`${global.apiEndpointUrl}user/${userId}/asset/${assetId}/presignedPost`, {
+    fetch(targetUrl, {
       method: 'POST',
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': global.userToken.token_type + ' ' + global.userToken.id_token
+        'Authorization': `${global.userToken.token_type} ${global.userToken.id_token}`
       }
     })
       .then(response => response.json())
@@ -446,7 +556,12 @@ const uploadAsset = async function (userId, assetId, isEditable) {
         resolve(data);
       })
       .catch((error) => {
-        setNotification(`FAIL TO UPLOAD ASSET ${assetId} ON USER ${userId} WITH ERROR: ${error}`);
+        if (assetId === "new_asset") {
+          setNotification(`FAIL TO CREATE NEW ASSET ON USER ${userId} WITH ERROR: ${error}`);
+        }
+        else {
+          setNotification(`FAIL TO UPLOAD ASSET ${assetId} ON USER ${userId} WITH ERROR: ${error}`);
+        }
 
         reject(error);
       });
@@ -455,22 +570,27 @@ const uploadAsset = async function (userId, assetId, isEditable) {
   // Reference from https://bobbyhadz.com/blog/notes-s3-signed-url
   const formData = new FormData();
 
-  Object.entries(response.fields).forEach(([k, v]) => {
+  Object.entries(response.presignedPost.fields).forEach(([k, v]) => {
     formData.append(k, v);
   });
 
-  formData.append('file', document.getElementById(`user_${userId}_asset_${assetId}_file`).files[0]);
+  formData.append('file', document.getElementById(targetFileDivId).files[0]);
 
   // post data
-  fetch(response.url, {
+  fetch(response.presignedPost.url, {
     method: 'POST',
     body: formData
   })
     .then(data => {
-      getAsset(userId, assetId, isEditable)
+      getAsset(userId, response.id, isEditable)
     })
     .catch((error) => {
-      setNotification('FAIL TO UPLOAD PROFILE PICTURE WITH ERROR ' + error);
+      if (assetId === "new_asset") {
+        setNotification(`FAIL TO CREATE NEW ASSET ${response.id} ON USER ${userId} WITH ERROR: ${error}`);
+      }
+      else {
+        setNotification(`FAIL TO UPLOAD ASSET ${assetId} ON USER ${userId} WITH ERROR: ${error}`);
+      }
 
       console.error('Error:', error);
     });

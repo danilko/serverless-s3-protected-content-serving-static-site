@@ -141,7 +141,7 @@ exports.handler = async function (event, context) {
       // Limit to 10 records for now
       // If lastEvaluatedId is not present, will get the first pagination
       // Otherwise use the lastEvaluatedId field to try processing pagination
-      var response = await UserDAO.getUserAssets(user.id, maxQuerySize, lastEvaluatedId, true);
+      const response = await UserDAO.getUserAssets(user.id, maxQuerySize, lastEvaluatedId, true);
 
       return {
         statusCode: 200,
@@ -164,12 +164,12 @@ exports.handler = async function (event, context) {
           await UserDAO.deleteUserAsset(user.id, assetId);
         }
 
-          return {
-            statusCode: 200,
-            // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
-            headers: headers,
-            body: JSON.stringify(response)
-          };
+        return {
+          statusCode: 200,
+          // https://docs.aws.amazon.com/apigateway/latest/developerguide/how-to-cors.html
+          headers: headers,
+          body: JSON.stringify(response)
+        };
       }
       else {
         return {
@@ -180,11 +180,9 @@ exports.handler = async function (event, context) {
     }
 
     if (event.resource === "/user/{userId}/asset/presignedPost" || event.resource === "/user/{userId}/asset/{assetId}/presignedPost") {
-
-      let inputAssetId = uuidv4();
-      if (event.resource === "/user/{userId}/asset/{assetId}/presignedPost") {
-        const {assetId} = event.pathParameters;
-        inputAssetId = assetId;
+      const {assetId} = event.pathParameters;
+      let inputAssetId = assetId;
+      if (inputAssetId && inputAssetId !== "") {
         // check if previous asset exist, otherwise return 404
         if(!(await UserDAO.getUserAsset(userId, assetId, false))) {
           return {
@@ -194,13 +192,16 @@ exports.handler = async function (event, context) {
         }
       }
       else {
+        inputAssetId = uuidv4();
+
         // ensure the uuid is not used under the current one
-        while(UserDAO.getUserAsset(userId, inputAssetId, false)) {
+        while(await UserDAO.getUserAsset(userId, inputAssetId, false)) {
           inputAssetId = uuidv4();
         }
       }
 
       const response = await UserDAO.createUpdateUserAsset(userId, inputAssetId, true);
+
       if(response) {
         return {
           statusCode: 200,
