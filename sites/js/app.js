@@ -166,7 +166,6 @@ var getAllAssetsAPI = async function (lastEvaluatedId) {
 const populateAssetsContent = async function (data, clearContent) {
 
   let assetsDiv = document.getElementById('assets');
-
   // Clear previous results
   if (clearContent) {
     // Then just replace whole content
@@ -202,6 +201,8 @@ const populateAssetsContent = async function (data, clearContent) {
 }
 
 const populateUploadNewAssetUploadDiv = async function () {
+
+
   let uploadNewAssetDiv = document.getElementById("uploadNewAsset");
   uploadNewAssetDiv.innerHTML = "";
 
@@ -281,14 +282,17 @@ const populateUserAssetDiv = async function (userAssetDiv, userId, asset, isEdit
     userAssetDiv.append(document.createElement("br"));
 
     const link = document.createElement('a');
+    // If a high-res is available, then serve it as a download link
     if(asset.urls.hiResUrl) {
       link.href = asset.urls.hiResUrl;
+      link.textContent = 'Download Original Hi-Res File';
     }
     else {
       link.href = asset.urls.url;
+      link.textContent = 'Download Original File';
     }
     link.target = '_blank';                               // Ensures the link opens in a new tab/window
-    link.textContent = 'Download Original File';          // Visible text for the link
+
 
     // Append the link to the document (e.g., to the body)
     userAssetDiv.append(link);
