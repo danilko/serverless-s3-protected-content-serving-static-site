@@ -7,8 +7,8 @@ interface AssetListProps {
   onDeleteAssetHandler: (asset: IAsset) => void;
   onRefreshAssetStatusHandler: (asset: IAsset) => void;
   onUploadAssetHandler: (asset: IAsset, file: File) => void;
-  pageToken: string | null;
-  onNextPage: (lastEvaluatedId: string) => void;
+  lastEvaluatedKey: object | null;
+  onNextPage: (lastEvaluatedKey: object) => void;
   isEditable: boolean;
 }
 
@@ -17,7 +17,7 @@ const AssetListComponent: React.FC<AssetListProps> = ({
                                                         onDeleteAssetHandler,
                                                         onRefreshAssetStatusHandler,
                                                         onUploadAssetHandler,
-                                               pageToken,
+                                                        lastEvaluatedKey,
                                                onNextPage,
                                                isEditable,
                                              }) => {
@@ -31,9 +31,9 @@ const AssetListComponent: React.FC<AssetListProps> = ({
       ) : (
         <p className="text-gray-600">No assets to display.</p>
       )}
-      {pageToken && (
+      {lastEvaluatedKey && (
         <button
-          onClick={() => onNextPage(pageToken)}
+          onClick={() => onNextPage(lastEvaluatedKey)}
           className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
         >
           Next Page

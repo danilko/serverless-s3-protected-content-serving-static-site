@@ -4,7 +4,7 @@ export const getAssets = async (
   apiEndpointUrl: string,
   userId: string,
   token: IUserToken,
-  lastEvaluatedKey: object,
+  lastEvaluatedKey?: object,
 ): Promise<IAssets> => {
   const response = await fetch(`${apiEndpointUrl}user/${userId}/assets`, {
     method: 'PUT',

@@ -21,7 +21,7 @@ const App: React.FC = () => {
   const [userToken, setUserToken] = useState<IUserToken | null>(null);
   const [userInfo, setUserInfo] = useState<IUser | null>(null);
   const [assets, setAssets] = useState<IAsset[]>([]);
-  const [assetsPageToken, setAssetsPageToken] = useState<object | null>(null);
+  const [lastEvaluatedKey, setLastEvaluatedKey] = useState<object | null>(null);
   const { showNotification } = useNotification();
 
   useEffect(() => {
@@ -134,7 +134,7 @@ const App: React.FC = () => {
       } else {
         setAssets(data.assets);
       }
-      setAssetsPageToken(data.lastEvaluatedKey || null);
+      setLastEvaluatedKey(data.lastEvaluatedKey || null);
     } catch (error) {
       console.error(error);
       showNotification(`Error get asset list: ${error}`, "error");
@@ -262,7 +262,7 @@ const App: React.FC = () => {
 
           <AssetListComponent
             assets={assets}
-            pageToken={assetsPageToken}
+            lastEvaluatedKey={lastEvaluatedKey}
             onNextPage={handleLoadAssets}
             isEditable={true}
            onDeleteAssetHandler={handleDeleteAsset} onRefreshAssetStatusHandler={handleRefreshAsset} onUploadAssetHandler={handleUploadAsset}/>
