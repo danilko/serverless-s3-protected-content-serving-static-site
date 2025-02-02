@@ -1,0 +1,4 @@
+{
+    "signInUrl" : "https://website-app.auth.us-west-2.amazoncognito.com/login?client_id=763nvhks2arkmoodo5f31do3nk&response_type=token&redirect_uri=http://localhost:3000",
+    "apiEndpointUrl" : "https://2e5qb10w89.execute-api.us-west-2.amazonaws.com/prod/"
+}

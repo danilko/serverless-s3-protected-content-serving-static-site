@@ -124,7 +124,7 @@ ServerlessS3SiteStack.usersapiEndpoint* = https://testapi.execute-api.us-west-2.
 ## Setup
 
 ### Set up the static site
-In `sites/site_config.json`
+In `site/public/site_config.json`
 
 Replace following `<WebsiteSignInUrl from CDK output>` and `<usersapiEndpoint* from CDK output>` with actual values and save the change
 ```
@@ -138,7 +138,19 @@ Replace following `<WebsiteSignInUrl from CDK output>` and `<usersapiEndpoint* f
 
 From main folder, please 
 ```
-cd sites
+cd site
+
+# install npx (one time operation if not already)
+npm i -g npx
+
+# install all missing package
+npm install
+
+# do a build
+next build
+# move into the next build out
+
+cd out
 aws s3 sync . s3://<WebsiteBucketName from CDK output>/
 ```
 
