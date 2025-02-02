@@ -4,16 +4,18 @@ export const getAssets = async (
   apiEndpointUrl: string,
   userId: string,
   token: IUserToken,
-  lastEvaluatedId: string = ''
+  lastEvaluatedKey: object,
 ): Promise<IAssets> => {
-  const query = lastEvaluatedId ? `?lastEvaluatedId=${lastEvaluatedId}` : '';
-  const response = await fetch(`${apiEndpointUrl}user/${userId}/assets${query}`, {
-    method: 'GET',
+  const response = await fetch(`${apiEndpointUrl}user/${userId}/assets`, {
+    method: 'PUT',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `${token.token_type} ${token.id_token}`,
     },
+    body: JSON.stringify({
+      lastEvaluatedKey : lastEvaluatedKey
+    })
   });
   if (!response.ok) throw new Error('Failed to fetch assets');
   return response.json();
@@ -87,10 +89,7 @@ export const uploadAssetWithIAssetPresignedPost = async (
 
   const response = await fetch(assetPresignedPost.url, {
     method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    body: formData
   });
   if (!response.ok) throw new Error(`Failed to perform s3 upload to ${assetPresignedPost.url}`);
 };

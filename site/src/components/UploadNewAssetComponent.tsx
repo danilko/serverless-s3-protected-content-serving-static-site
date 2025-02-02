@@ -9,7 +9,7 @@ interface UploadAssetComponentProps {
 const UploadAssetComponent: React.FC<UploadAssetComponentProps> = ({
                                                                      onNewAssetUpload,
                                                                    }) => {
-  const [file, setFile] = useState<File | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const { showNotification } = useNotification();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -17,19 +17,19 @@ const UploadAssetComponent: React.FC<UploadAssetComponentProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
     }
   };
 
   const handleUpload = async () => {
     try {
-      if (file) {
+      if (selectedFile) {
         // If onNewAssetUpload is async, you may want to await it to confirm success
-        onNewAssetUpload(file);
+        onNewAssetUpload(selectedFile);
 
         // Clear local state
-        setFile(null);
+        setSelectedFile(null);
 
         // Clear input value
         if (fileInputRef.current) {
@@ -62,15 +62,17 @@ const UploadAssetComponent: React.FC<UploadAssetComponentProps> = ({
             <input
               type="file"
               accept=".png"
-              id="new_asset_file"
               onChange={handleFileChange}
-              className="w-full"
+              className="border p-1 rounded"
               ref={fileInputRef} // attach the ref here
             />
           </div>
           <button
             onClick={handleUpload}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            disabled={!selectedFile}
+            className={`px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors ${
+              !selectedFile ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
           >
             Upload New Asset
           </button>

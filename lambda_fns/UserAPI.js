@@ -31,18 +31,22 @@ exports.handler = async function (event, context) {
     let tokenUserId = event.requestContext.authorizer.claims['cognito:username'].toLowerCase();
 
     if (event.resource === "/users") {
-      if (event.httpMethod === "GET") {
-        // Get the query parameter lastEvaluatedId (if exist)
-        let lastEvaluatedId = null;
+      if (event.httpMethod === "PUT") {
+        // Get the query parameter lastEvaluatedKey (if exist)
+        let lastEvaluatedKey = null;
 
-        if (event.queryStringParameters && event.queryStringParameters.lastEvaluatedId) {
-          lastEvaluatedId = event.queryStringParameters.lastEvaluatedId;
+        if(event.body) {
+          try {
+            lastEvaluatedKey=(JSON.parse(event.body)).lastEvaluatedKey;
+          } catch (error) {
+            // silent ignore if
+          }
         }
 
         // Limit to 10 records for now
-        // If lastEvaluatedId is not present, will get the first pagination
-        // Otherwise use the lastEvaluatedId field to try processing pagination
-        const response = await UserDAO.getUsers(maxQuerySize, lastEvaluatedId, true);
+        // If lastEvaluatedKey is not present, will get the first pagination
+        // Otherwise use the lastEvaluatedKey field to try processing pagination
+        const response = await UserDAO.getUsers(maxQuerySize, lastEvaluatedKey, true);
 
         return {
           statusCode: 200,
@@ -131,17 +135,21 @@ exports.handler = async function (event, context) {
     }
 
     if (event.resource === "/user/{userId}/assets") {
-      // Get the query parameter lastEvaluatedId (if exist)
-      let lastEvaluatedId = null;
+      // Get the payload body in the last evaluated key
+      let lastEvaluatedKey = null;
 
-      if (event.queryStringParameters && event.queryStringParameters.lastEvaluatedId) {
-        lastEvaluatedId = event.queryStringParameters.lastEvaluatedId;
+      if(event.body) {
+        try {
+          lastEvaluatedKey=(JSON.parse(event.body)).lastEvaluatedKey;
+        } catch (error) {
+          // silent ignore if
+        }
       }
 
       // Limit to 10 records for now
-      // If lastEvaluatedId is not present, will get the first pagination
-      // Otherwise use the lastEvaluatedId field to try processing pagination
-      const response = await UserDAO.getUserAssets(user.id, maxQuerySize, lastEvaluatedId, true);
+      // If lastEvaluatedKey is not present, will get the first pagination
+      // Otherwise use the lastEvaluatedKey field to try processing pagination
+      const response = await UserDAO.getUserAssets(user.id, maxQuerySize, lastEvaluatedKey, true);
 
       return {
         statusCode: 200,

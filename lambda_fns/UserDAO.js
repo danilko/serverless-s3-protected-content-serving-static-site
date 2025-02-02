@@ -15,11 +15,11 @@ module.exports = {
   /**
    * Get all users based on input userId
    * @param {*} pageSize The maximum pageSize to return
-   * @param {*} lastEvaluatedId The lastEvaluatedId to be used to continue to next page search
+   * @param {*} lastEvaluatedKey The lastEvaluatedKey to be used to continue to next page search
    * @param {*} generatedAsset If true, generate the asset along with all users
    * @returns all orders for given userId
    */
-  getUsers: async function (pageSize, lastEvaluatedId, generatedAsset) {
+  getUsers: async function (pageSize, lastEvaluatedKey, generatedAsset) {
     // Reference https://stackoverflow.com/questions/56074919/dynamo-db-pagination
     let params = {
       TableName: process.env.WEBSITE_TABLE,
@@ -34,8 +34,8 @@ module.exports = {
       Limit: pageSize
     };
 
-    if (lastEvaluatedId) {
-      params.ExclusiveStartKey = { item_id: lastEvaluatedId };
+    if (lastEvaluatedKey && lastEvaluatedKey["gsi_pk"] && lastEvaluatedKey["gsi_sk"] && lastEvaluatedKey["pk"] && lastEvaluatedKey["sk"]) {
+      params.ExclusiveStartKey = lastEvaluatedKey;
     }
 
     try {
@@ -58,7 +58,7 @@ module.exports = {
 
       return {
         users: response.Items,
-        lastEvaluatedId: response.LastEvaluatedKey
+        lastEvaluatedKey: response.LastEvaluatedKey
       };
 
     } catch (error) {
@@ -69,11 +69,11 @@ module.exports = {
    * Get all user assets based on input userId
    * @param {*} userId The userId
    * @param {*} pageSize The maximum pageSize to return
-   * @param {*} lastEvaluatedId The lastEvaluatedId to be used to continue to next page search
+   * @param {*} lastEvaluatedKey The lastEvaluatedKey to be used to continue to next page search
    * @param {*} generatedAsset If true, generate the asset along with all users
    * @returns all orders for given userId
    */
-  getUserAssets: async function (userId, pageSize, lastEvaluatedId, generatedAsset) {
+  getUserAssets: async function (userId, pageSize, lastEvaluatedKey, generatedAsset) {
     // Reference https://stackoverflow.com/questions/56074919/dynamo-db-pagination
     let params = {
       TableName: process.env.WEBSITE_TABLE,
@@ -88,8 +88,8 @@ module.exports = {
       Limit: pageSize
     };
 
-    if (lastEvaluatedId) {
-      params.ExclusiveStartKey = { item_id: lastEvaluatedId };
+    if (lastEvaluatedKey && lastEvaluatedKey["gsi_pk"] && lastEvaluatedKey["gsi_sk"] && lastEvaluatedKey["pk"] && lastEvaluatedKey["sk"]) {
+      params.ExclusiveStartKey = lastEvaluatedKey;
     }
 
     try {
@@ -108,7 +108,7 @@ module.exports = {
 
       return {
         assets: response.Items,
-        lastEvaluatedId: response.LastEvaluatedKey
+        lastEvaluatedKey: response.LastEvaluatedKey
       };
 
     } catch (error) {

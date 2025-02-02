@@ -21,7 +21,7 @@ const App: React.FC = () => {
   const [userToken, setUserToken] = useState<IUserToken | null>(null);
   const [userInfo, setUserInfo] = useState<IUser | null>(null);
   const [assets, setAssets] = useState<IAsset[]>([]);
-  const [assetsPageToken, setAssetsPageToken] = useState<string | null>(null);
+  const [assetsPageToken, setAssetsPageToken] = useState<object | null>(null);
   const { showNotification } = useNotification();
 
   useEffect(() => {
@@ -117,7 +117,7 @@ const App: React.FC = () => {
   }
   };
 
-  const handleLoadAssets = async (lastEvaluatedId: string = '') => {
+  const handleLoadAssets = async (lastEvaluatedKey?: object) => {
     if (!config || !userInfo || !userToken) {
       showNotification('Fail to load assets as user token is invalid, please refresh page.', "error");
       return;
@@ -127,14 +127,14 @@ const App: React.FC = () => {
         config.apiEndpointUrl,
         userInfo.id,
         userToken,
-        lastEvaluatedId
+        lastEvaluatedKey
       );
-      if (lastEvaluatedId) {
+      if (lastEvaluatedKey) {
         setAssets((prev) => [...prev, ...data.assets]);
       } else {
         setAssets(data.assets);
       }
-      setAssetsPageToken(data.lastEvaluatedId || null);
+      setAssetsPageToken(data.lastEvaluatedKey || null);
     } catch (error) {
       console.error(error);
       showNotification(`Error get asset list: ${error}`, "error");
@@ -254,7 +254,7 @@ const App: React.FC = () => {
           <div className="my-8">
             <button
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-              onClick={() => handleLoadAssets()}
+              onClick={() => handleLoadAssets(undefined)}
             >
               Load My Assets
             </button>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useRef, useState} from 'react';
 import { IAsset } from '@/types';
 
 interface AssetComponentProps {
@@ -18,6 +18,9 @@ const AssetComponent: React.FC<AssetComponentProps> = ({
                                                        }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
+  // Use a ref to programmatically clear the file input
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
@@ -34,7 +37,7 @@ const AssetComponent: React.FC<AssetComponentProps> = ({
 
   const handleAssetUpload = async () => {
     if (selectedFile) {
-      onUploadAssetHandler(asset, selectedFile);
+      await onUploadAssetHandler(asset, selectedFile);
       setSelectedFile(null);
     }
   };
@@ -95,8 +98,10 @@ const AssetComponent: React.FC<AssetComponentProps> = ({
         <div className="flex items-center space-x-2">
           <input
             type="file"
+            accept=".png"
             onChange={handleFileChange}
             className="border p-1 rounded"
+            ref={fileInputRef} // attach the ref here
           />
           <button
             onClick={handleAssetUpload}

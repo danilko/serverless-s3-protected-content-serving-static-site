@@ -27,7 +27,7 @@ export interface IAssetPresignedPost {
 
 export interface IAssets {
   assets: IAsset[];
-  lastEvaluatedId?: string;
+  lastEvaluatedKey?: object;
 }
 
 export interface IUser {

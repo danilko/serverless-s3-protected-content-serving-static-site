@@ -316,7 +316,7 @@ export class ServerlessS3SiteStack extends Stack {
 
     // Add users resource for retriving all users
     const usersResource = serviceAPI.root.addResource('users');
-    usersResource.addMethod("GET", usersIntegration, {
+    usersResource.addMethod("PUT", usersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     });
@@ -338,7 +338,7 @@ export class ServerlessS3SiteStack extends Stack {
 
     // Add user resource for specific user
     const userAssetsResource = userIDResource.addResource("assets");
-    userAssetsResource.addMethod("GET", usersIntegration, {
+    userAssetsResource.addMethod("PUT", usersIntegration, {
       authorizer: websiteUserPoolAuth,
       authorizationType: apigateway.AuthorizationType.COGNITO
     });

@@ -21,6 +21,9 @@ Some other setup (such as lambda endpoint for update certain dynamo DB field are
 
 Once setup according to readme, is able to do following flow.
 
+![Screenshot](images/screenshot.png)
+
+
 Overall flow:
 1. User login into website secured by AWS cognito (OAuth2 web flow)
 2. User login into the site, select a picture as his/her asset from local, click "upload"
