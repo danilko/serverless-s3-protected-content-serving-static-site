@@ -169,3 +169,68 @@ Please note all S3 contents (both website and content buckets), DynamoDB table, 
 cdk destroy
 ```
 
+## Local Testing UI
+***
+<H3>Please do note this method will break security as it allows everyone to use the published AWS Gateway/Lambda endpoints in their own localhost environment.
+So should disable after the development is completed.<H3>
+***
+
+### Update public endpoints CORS setting
+In case need to test the UI locally with remote API, following mechanism can be done:
+Please change `lib/serverless_s3_site-stack.ts`
+
+```
+const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName; 
+```
+
+to
+
+```
+const webisteOrigin = 'http://localhost:3000';  
+```
+Save the file.
+
+### Deploy the stack
+Deploy the stack again with the change
+```
+cdk deploy
+```
+
+Please continue with gather info as part of output, info will look like below
+```
+ServerlessS3SiteStack.WebsiteBucketName = testbucket
+ServerlessS3SiteStack.WebsiteCognitoUserPoolId = testid_us-west-2
+ServerlessS3SiteStack.WebsiteSignInUrl = <website sign in url>
+ServerlessS3SiteStack.WebsiteUrl = http://localhost:3000
+ServerlessS3SiteStack.usersapiEndpoint* = https://testapi.execute-api.us-west-2.amazonaws.com/prod/
+
+```
+
+### Update UI and start local react development server
+In `site/public/site_config.json`
+
+Replace following `<WebsiteSignInUrl from CDK output>` and `<usersapiEndpoint* from CDK output>` with actual values and save the change
+```
+{
+ "signInUrl" : "<WebsiteSignInUrl from CDK output>";
+ "apiEndpointUrl" : "<usersapiEndpoint* from CDK output>";
+}
+```
+
+Start up react locally
+```
+cd site
+npm run dev
+```
+
+### Revert back local testing CORS setting on API endpoints
+Once done with local testing, can then revert the `lib/serverless_s3_site-stack.ts` to
+```
+const webisteOrigin = 'https://' + websiteDistribution.distributionDomainName; 
+```
+Deploy the stack again with the change to secure the endpoint with correct CORS
+```
+cdk deploy
+```
+
+
