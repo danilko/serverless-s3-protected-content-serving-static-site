@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+
 import { ISiteConfig, IUserToken, IUser, IAsset } from '@/types';
 import {
   loadSiteConfig,
@@ -89,7 +90,7 @@ const App: React.FC = () => {
       );
       setUserInfo(fullUserInfo);
       // Clean up URL (remove hash)
-      window.history.pushState('', '', '/');
+      window.history.pushState({}, '', origin);
     } catch (error) {
       console.error(error);
       showNotification('Error handling token callback.', "error");
