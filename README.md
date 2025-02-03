@@ -80,7 +80,7 @@ npm install
 Install dependencies for lambda
 ```
 cd lambda_layers
-npm install --arch=x64 --platform=linux sharp
+npm install --os=linux --cpu=x64 sharp
 npm install
 cd ..
 ```
