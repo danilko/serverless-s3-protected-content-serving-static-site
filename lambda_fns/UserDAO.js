@@ -97,17 +97,17 @@ module.exports = {
         .query(params)
         .promise();
 
-      // Loop through all items to add asset download link
-      for (let index = 0; index < response.Items.length; index++) {
-        if (generatedAsset) {
-          // Get Asset link for each asset
-          response.Items[index].urls = await this.createAssetGetSignedUrl(userId, response.Items[index].id,
-            response.Items[index].isAssetHiRes);
+      let assets = [];
+
+      if(response.Items) {
+        // Loop through all items to add asset download link
+        for (let index = 0; index < response.Items.length; index++) {
+          assets.push(await this.prepareUserAsset(userId, response.Items[index], generatedAsset));
         }
       }
 
       return {
-        assets: response.Items,
+        assets: assets,
         lastEvaluatedKey: response.LastEvaluatedKey
       };
 
@@ -150,6 +150,27 @@ module.exports = {
     return userRecord.Item;
   },
   /**
+   * Prepare a record from dynamodb to prepare for actual return asset object for downstream use
+   * Few use case is to parse metadatas as an object instead of string, and generated presigned url if need
+   * @param {string} userId user id
+   * @param {*} assetRecord record from dynamodb
+   * @param {*} generatedAsset boolean to indicate is asset
+   * @returns {*} assetObject ready for downstream to use
+   */
+  prepareUserAsset: async function (userId, assetRecord, generatedAsset) {
+    if(assetRecord.metadatas) {
+      assetRecord.metadatas = JSON.parse(assetRecord.metadatas);
+    }
+
+    if (generatedAsset) {
+      // Get Asset link for each asset
+      assetRecord.urls = await this.createAssetGetSignedUrl(userId, assetRecord.id,
+        assetRecord.isAssetHiRes);
+    }
+
+    return assetRecord;
+  },
+  /**
    * Get a record based on input id
    * @param {*} userId The input user's id to be searched
    * @param {*} assetId The input assetId id to be searched under inputted user id
@@ -168,15 +189,13 @@ module.exports = {
       })
       .promise();
 
-    if (assetRecord && assetRecord.Item) {
+    let asset = assetRecord.Item;
 
-      // Get Asset url for asset link if upload is completed
-      if (generatedAsset && assetRecord.Item.status === 'UPLOADED') {
-        assetRecord.Item.urls = await this.createAssetGetSignedUrl(userId, assetId, assetRecord.Item.isAssetHiRes);
-      }
+    if (assetRecord && assetRecord.Item) {
+      asset = await this.prepareUserAsset(userId, assetRecord.Item, generatedAsset);
     }
 
-    return assetRecord.Item;
+    return asset;
   },
   /**
    * Modify or create a user record base on username
@@ -254,7 +273,7 @@ module.exports = {
           "pk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}${assetId}`,
           "sk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}`,
         },
-        UpdateExpression: "set #gsi_pk = :gsi_pk, #gsi_sk = :gsi_sk,  #id = :id,  #lastModfiedTS = :lastModfiedTS, #isAssetHiRes = :isAssetHiRes, #status = :status",
+        UpdateExpression: "set #gsi_pk = :gsi_pk, #gsi_sk = :gsi_sk,  #id = :id,  #lastModfiedTS = :lastModfiedTS, #metadatas = :metadatas, #isAssetHiRes = :isAssetHiRes, #status = :status",
         ExpressionAttributeNames: {
           "#id" : "id",
           "#gsi_pk": GSI_PK_NAME,
@@ -262,6 +281,7 @@ module.exports = {
           "#lastModfiedTS": "lastModfiedTS",
           "#isAssetHiRes": "isAssetHiRes",
           "#status": "status",
+          "#metadatas": "metadatas",
         },
         ExpressionAttributeValues: {
           ":id" : assetId,
@@ -269,6 +289,7 @@ module.exports = {
           ":gsi_sk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}${assetId}`,
           ":lastModfiedTS": Date.now(),
           ":isAssetHiRes": false,
+          ":metadatas": JSON.stringify({}),
           ":status": this.ASSET_STATUS_PENDING_UPLOAD,
         },
         ReturnValues: "ALL_NEW"
@@ -287,11 +308,21 @@ module.exports = {
    * Modify or create a user record base on username
    * @param {*} userId
    * @param {*} assetId assetId to be updated
-   * @param isAssetHiRes boolean to indicate if the assset has hi-res
-   * @param status asset status to be updated
+   * @param {*} isAssetHiRes boolean to indicate if the assset has hi-res
+   * @param {*} status asset status to be updated
+   * @param {*} metadatas object to represent metadata
    * @returns record
    */
-  updateUserAssetStatus: async function (userId, assetId, isAssetHiRes, status) {
+  updateUserAssetStatus: async function (userId, assetId, isAssetHiRes, metadatas, status) {
+
+    // set to empty to ensure not error out dynamodb if undefined
+    if(!metadatas) {
+      metadatas = {};
+    }
+    if(!isAssetHiRes) {
+      isAssetHiRes = false;
+    }
+
     // update dynamodb with default values
     await dynamoDB
       .update({
@@ -300,18 +331,20 @@ module.exports = {
           "pk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}${assetId}`,
           "sk": `${USER_PK_PREFIX}${userId}${USER_ASSET_PK_PREFIX}`,
         },
-        UpdateExpression: "set #lastModfiedTS = :lastModfiedTS, #isAssetHiRes = :isAssetHiRes, #status = :status",
+        UpdateExpression: "set #lastModfiedTS = :lastModfiedTS, #isAssetHiRes = :isAssetHiRes, #metadatas = :metadatas, #status = :status",
         // ConditionExpression ensures the item already exists
         ConditionExpression: 'attribute_exists(pk) AND attribute_exists(sk)',
         ExpressionAttributeNames: {
           "#lastModfiedTS": "lastModfiedTS",
           "#isAssetHiRes": "isAssetHiRes",
           "#status": "status",
+          "#metadatas": "metadatas",
         },
         ExpressionAttributeValues: {
           ":lastModfiedTS": Date.now(),
           ":isAssetHiRes": isAssetHiRes,
           ":status": status,
+          ":metadatas": JSON.stringify(metadatas),
         },
         ReturnValues: "ALL_NEW"
       }).promise();

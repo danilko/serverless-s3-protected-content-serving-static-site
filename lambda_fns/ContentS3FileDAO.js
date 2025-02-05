@@ -1,5 +1,3 @@
-const AWS = require('aws-sdk');
-const s3 = new AWS.S3({"signatureVersion": "v4"});
 const S3DAO = require('./S3DAO.js');
 const sharp = require("sharp");
 
@@ -23,11 +21,19 @@ module.exports = {
     // Download the file from S3
     const originalFile = await S3DAO.getAsset(assetRawPrefix);
 
-
     // reference from
     // https://sahanamarsha.medium.com/resizing-s3-images-with-aws-lambda-trigger-ca4cf2372d0e
     let imageSharpObject = await sharp(originalFile.Body);
     const metadata = await imageSharpObject.metadata();
+
+    // set default
+    let metadatas = {
+      metadata: {
+        width: metadata.width,
+        height: metadata.height,
+        format: metadata.format,
+      }
+    };
 
     // no need to scale down
     if (metadata.width <= imageDownscaleLengthThreshold && metadata.height <= imageDownscaleLengthThreshold) {
@@ -38,17 +44,30 @@ module.exports = {
       // delete the raw image
       await S3DAO.deleteAsset(assetRawPrefix);
 
-      return false;
+      return metadatas;
     }
 
     // copy from source to high res folder
     await S3DAO.copyAssets(assetRawPrefix,
       assetHiResPrefix);
 
-    const resizedImageSharpObjectBuffer = await imageSharpObject
+    const { data: resizedImageSharpObjectBuffer, info: resizedImageMetadata } = await imageSharpObject
       .resize(await this.scaleImageSize(metadata.width, metadata.height, imageDownscaleLengthThreshold))
       .withMetadata()
-      .toBuffer();
+      .toBuffer({ resolveWithObject: true });
+
+    metadatas = {
+      metadata: {
+        width: resizedImageMetadata.width,
+        height: resizedImageMetadata.height,
+        format: resizedImageMetadata.format,
+      },
+      hiResMetadata: {
+        width: metadata.width,
+        height: metadata.height,
+        format: metadata.format,
+      },
+    };
 
     // put the new scale down image to the asset prefix
     await S3DAO.putAsset(resizedImageSharpObjectBuffer, assetLowResPrefix);
@@ -56,7 +75,7 @@ module.exports = {
     // delete the raw image
     await S3DAO.deleteAsset(assetRawPrefix);
 
-    return true;
+    return metadatas;
   },
   /**
    * Scale the dimensions of an image so that neither width nor height

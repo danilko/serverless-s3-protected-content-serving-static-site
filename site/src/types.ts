@@ -17,12 +17,24 @@ export interface IAsset {
     url: string;
     hiResUrl?: string;
   };
-  presignedPost?: IAssetPresignedPost
+  presignedPost?: IAssetPresignedPost;
+  metadatas?: {
+    metadata: {
+      width: number;
+      height: number;
+      format: string;
+    };
+    hiResMetadata?: {
+      width: number;
+      height: number;
+      format: string;
+    };
+  };
 }
 
 export interface IAssetPresignedPost {
-    fields : object,
-    url: string,
+  fields: object,
+  url: string,
 }
 
 export interface IAssets {

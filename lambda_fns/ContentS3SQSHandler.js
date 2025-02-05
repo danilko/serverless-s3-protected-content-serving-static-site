@@ -4,7 +4,6 @@ This code handles the incoming SQS message from Content S3 bucket
 
 const UserDAO = require('./UserDAO.js')
 const ContentS3FileDAO = require('./ContentS3FileDAO.js')
-const S3DAO = require('./S3DAO.js');
 
 exports.handler = async (event) => {
   // SQS event has 'Records' which each contain { messageId, body, ... }
@@ -55,10 +54,12 @@ exports.handler = async (event) => {
 
       try {
         // check if the uploaded prefix need transcoder
-        const isAssetHiRes = await ContentS3FileDAO.downscaleImage(userId, assetId);
-
+        const metadata = await ContentS3FileDAO.downscaleImage(userId, assetId);
+        // if high-res metadata exist, it is high resolution
+        // note to use !! so will ensure to return true or false, instead of undefined in case metadata or hiResMetadata not found
+        const isAssetHiRes = !!(metadata && metadata["hiResMetadata"]);
         // Update the user's asset status to 'UPLOADED'
-        await UserDAO.updateUserAssetStatus(userId, assetId, isAssetHiRes, UserDAO.ASSET_STATUS_UPLOADED);
+        await UserDAO.updateUserAssetStatus(userId, assetId, isAssetHiRes, metadata, UserDAO.ASSET_STATUS_UPLOADED);
         console.debug(`Updated user ${userId} asset ${assetId} status to UPLOADED and hi-res ${isAssetHiRes}`);
       } catch (updateErr) {
         console.error('Error updating user asset status:', updateErr);

@@ -68,23 +68,54 @@ const AssetComponent: React.FC<AssetComponentProps> = ({
         )}
       </div>
 
-      {/* Asset Content Section */}
       {asset.status === 'UPLOADED' ? (
         <div className="mb-4">
-          <img
-            src={asset.urls.url}
-            alt={`Asset ${asset.id}`}
-            className="w-32 h-32 object-cover rounded mb-2"
-          />
-          <div>
-            <a
-              href={asset.urls.hiResUrl || asset.urls.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
-            >
-              {asset.urls.hiResUrl ? 'Download Original Hi-Res File' : 'Download Original File'}
-            </a>
+          {/* Flex container for image & metadata side by side */}
+          <div className="flex items-start gap-6">
+            {/* Image & Download Button */}
+            <div className="shrink-0">
+              <img
+                src={asset.urls.url}
+                alt={`Asset ${asset.id}`}
+                className="w-32 h-32 object-cover rounded mb-2"
+              />
+              <div>
+                <a
+                  href={asset.urls.hiResUrl || asset.urls.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                >
+                  {asset.urls.hiResUrl ? 'Download Original Hi-Res File' : 'Download Original File'}
+                </a>
+              </div>
+            </div>
+
+            {/* Metadata Section */}
+            {asset.metadatas && (
+              <div className="mt-2">
+                {asset.metadatas.hiResMetadata ? (
+                  <>
+                    <h3 className="font-bold">Original Hi-Res Image Metadata</h3>
+                    <div>Width: {asset.metadatas.hiResMetadata.width}</div>
+                    <div>Height: {asset.metadatas.hiResMetadata.height}</div>
+                    <div>Format: {asset.metadatas.hiResMetadata.format}</div>
+
+                    <h3 className="font-bold mt-4">Scale Down Image Metadata</h3>
+                    <div>Width: {asset.metadatas.metadata.width}</div>
+                    <div>Height: {asset.metadatas.metadata.height}</div>
+                    <div>Format: {asset.metadatas.metadata.format}</div>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="font-bold">Original Image Metadata</h3>
+                    <div>Width: {asset.metadatas.metadata.width}</div>
+                    <div>Height: {asset.metadatas.metadata.height}</div>
+                    <div>Format: {asset.metadatas.metadata.format}</div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       ) : (

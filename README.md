@@ -75,10 +75,10 @@ cd <repo>
 Install the dependency
 ```
 npm install
-```
+```[site_config.json](site/public/site_config.json)
 
 Install dependencies for lambda
-```
+```[S3DAO.js](lambda_fns/S3DAO.js)
 cd lambda_layers
 npm install --os=linux --cpu=x64 sharp
 npm install
